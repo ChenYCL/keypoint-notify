@@ -251,9 +251,6 @@ func (s *Store) UpdateSide(taskID, keyOrID string, in UpdateSideInput, actor str
 		if err != nil {
 			return err
 		}
-		if len(released) == 0 {
-			return nil
-		}
 		emitter := model.Identity{Name: actor}
 		if idn, err := identityByNameTx(tx, actor); err == nil {
 			emitter = idn
@@ -261,6 +258,38 @@ func (s *Store) UpdateSide(taskID, keyOrID string, in UpdateSideInput, actor str
 		task, err := taskTx(tx, taskID)
 		if err != nil {
 			return err
+		}
+
+		// Every face finished, but the task is still open.
+		//
+		// Nothing else will ever notice: once all faces are `done` they stop
+		// matching any query that looks for outstanding work, so the task just
+		// sits there looking active forever. The moment the last face lands is
+		// the only point at which the fact is knowable, so it is handled here.
+		allDone, err := allSidesDoneTx(tx, taskID)
+		if err != nil {
+			return err
+		}
+		if allDone && task.Status != model.StatusDone && task.Status != model.StatusArchived {
+			from := task.Status
+			if _, err := tx.Exec(`UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?`,
+				model.StatusDone, now, taskID); err != nil {
+				return err
+			}
+			if _, err := emitTx(tx, EmitInput{
+				Type: EvTaskStatus, Actor: emitter, Task: &task, Kind: "status",
+				Title: task.Code + " 所有工作面已完成，任务自动收尾",
+				Payload: map[string]any{
+					"from_status": from, "to_status": model.StatusDone,
+					"reason": "all_sides_done",
+				},
+			}); err != nil {
+				return err
+			}
+			task.Status = model.StatusDone
+		}
+		if len(released) == 0 {
+			return nil
 		}
 		for _, sd := range released {
 			who := "@" + sd.AssigneeRole

@@ -239,3 +239,70 @@ func TestConcurrentClaimIsAtomic(t *testing.T) {
 		}
 	}
 }
+
+// Finishing the last work face has to close the task. Nothing else in the
+// system can notice: faces that are done stop matching any query for
+// outstanding work, so a task left open at that moment stays open forever.
+func TestLastFaceClosesTheTask(t *testing.T) {
+	h := newHarness(t)
+	code, keys := setupRelay(t, h)
+
+	var task struct {
+		Status string `json:"status"`
+	}
+	status := func() string {
+		h.do("GET", "/api/v1/tasks/"+code, nil, &task, http.StatusOK)
+		return task.Status
+	}
+
+	if got := status(); got == "done" {
+		t.Fatal("a task with unfinished faces must not be done")
+	}
+
+	// Walk the relay to completion.
+	for _, r := range []struct{ role, side string }{
+		{"backend", "api"}, {"frontend", "ui"}, {"review", "review"},
+	} {
+		if s := status(); s == "done" {
+			t.Fatalf("task closed early, before %s finished", r.side)
+		}
+		h.doAs(keys[r.role], "PATCH", "/api/v1/tasks/"+code+"/sides/"+r.side,
+			map[string]any{"status": "done"}, nil, http.StatusOK)
+	}
+	if got := status(); got != "done" {
+		t.Errorf("the last face finishing should close the task, got %q", got)
+	}
+
+	// The closure must be legible after the fact, not a silent state change.
+	var events struct {
+		Events []struct {
+			Type    string         `json:"type"`
+			Payload map[string]any `json:"payload"`
+		} `json:"events"`
+	}
+	h.do("GET", "/api/v1/events?task="+code+"&backlog=1", nil, &events, http.StatusOK)
+	found := false
+	for _, e := range events.Events {
+		if e.Payload["reason"] == "all_sides_done" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the automatic closure should appear in the timeline with its reason")
+	}
+}
+
+// A task with no work faces is not "all done" — it was never broken down, and
+// closing it would hide it from the board.
+func TestTaskWithoutFacesIsNotAutoClosed(t *testing.T) {
+	h := newHarness(t)
+	code := h.newTask("没有拆面的任务", nil)
+
+	var task struct {
+		Status string `json:"status"`
+	}
+	h.do("GET", "/api/v1/tasks/"+code, nil, &task, http.StatusOK)
+	if task.Status == "done" {
+		t.Errorf("a task with no faces should stay open, got %q", task.Status)
+	}
+}

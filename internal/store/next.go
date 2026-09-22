@@ -401,3 +401,18 @@ func (s *Store) ClaimSide(taskCode, sideKey string, who model.Identity) (bool, e
 	}
 	return n == 1, nil
 }
+
+// allSidesDoneTx reports whether every work face of a task has finished.
+//
+// A task with no faces at all returns false on purpose: "everything is done"
+// and "there was never anything to do" are different statements, and only the
+// first one should close a task.
+func allSidesDoneTx(tx *sql.Tx, taskID string) (bool, error) {
+	var total, done int
+	if err := tx.QueryRow(
+		`SELECT COUNT(*), COUNT(*) FILTER (WHERE status = ?) FROM sides WHERE task_id = ?`,
+		model.SideDone, taskID).Scan(&total, &done); err != nil {
+		return false, err
+	}
+	return total > 0 && total == done, nil
+}
