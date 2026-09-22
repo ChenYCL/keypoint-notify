@@ -29,9 +29,6 @@ type Options struct {
 	// "（待补）" placeholders. Off by default so an empty task does not look
 	// like it has content.
 	IncludeEmpty bool
-	// IncludeSides lists sibling sides (status/owner/deps) even when focused on
-	// one. On by default; it is how a receiver learns it is blocked.
-	IncludeSides bool
 }
 
 // DefaultMaxChars is the pack size cap when the caller does not set one.
