@@ -56,7 +56,8 @@ type nextResp struct {
 	} `json:"work"`
 	Cursor  int64  `json:"cursor"`
 	Claimed *bool  `json:"claimed"`
-	Note    string `json:"hint"`
+	Note    string `json:"note"`
+	Hint    string `json:"hint"`
 }
 
 func (h *harness) nextAs(key, query string) nextResp {
@@ -138,9 +139,14 @@ func TestMentionDoesNotTransferOwnership(t *testing.T) {
 	if w.Work.Reason != "mention" {
 		t.Errorf("want reason=mention, got %q", w.Work.Reason)
 	}
-	// The face being mentioned is review's own, so claiming it is legitimate.
-	if w.Claimed == nil || !*w.Claimed {
-		t.Error("the mentioned role owns that face; claiming it should succeed")
+	// A mention is not dispatch: it asks for an answer, and answering does not
+	// hand over the face it was asked on. The face here is also not ready yet
+	// (its own dependency is open), so there is nothing to take anyway.
+	if w.Claimed != nil && *w.Claimed {
+		t.Error("a mention must not claim the face it was asked on")
+	}
+	if w.Note == "" {
+		t.Error("when claim=1 turns out not to be a dispatch, the response should say so")
 	}
 
 	// A backend session polling with claim=1 may legitimately take its *own*
@@ -349,5 +355,63 @@ func TestNextCanSkipTasks(t *testing.T) {
 	w = h.nextAs(keys["backend"], "?exclude="+a+","+b+","+c)
 	if w.Work != nil && (w.Work.Task.Code == a || w.Work.Task.Code == b || w.Work.Task.Code == c) {
 		t.Errorf("all three were excluded but %s came back", w.Work.Task.Code)
+	}
+}
+
+// A burst of same-role sessions must fan out across the queue, not pile onto
+// the head of it.
+//
+// The naive shape — pick one candidate, then try to claim it — makes every
+// concurrent caller see the same head: one wins, the rest get "someone else
+// took it" and have to ask again to discover the next. Twelve racers against
+// twelve available faces should end with twelve distinct owners.
+func TestConcurrentDispatchFansOut(t *testing.T) {
+	h := newHarness(t)
+	_, keys := setupRelay(t, h)
+
+	const n = 12
+	codes := make([]string, n)
+	for i := 0; i < n; i++ {
+		var out struct {
+			Task struct {
+				Code string `json:"code"`
+			} `json:"task"`
+		}
+		h.do("POST", "/api/v1/tasks", map[string]any{
+			"title": "并行任务",
+			"sides": []map[string]any{{"key": "fix", "assignee_role": "backend"}},
+		}, &out, http.StatusCreated)
+		codes[i] = out.Task.Code
+	}
+
+	var wg sync.WaitGroup
+	got := make([]string, n)
+	claimed := make([]bool, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			r := h.nextAs(keys["backend"], "?claim=1")
+			if r.Work != nil {
+				got[i] = r.Work.Task.Code
+			}
+			claimed[i] = r.Claimed != nil && *r.Claimed
+		}(i)
+	}
+	wg.Wait()
+
+	seen := map[string]int{}
+	for i, c := range got {
+		if claimed[i] && c != "" {
+			seen[c]++
+		}
+	}
+	for code, count := range seen {
+		if count > 1 {
+			t.Errorf("%s was dispatched to %d sessions at once", code, count)
+		}
+	}
+	if len(seen) != n {
+		t.Errorf("expected all %d faces to be dispatched, got %d", n, len(seen))
 	}
 }

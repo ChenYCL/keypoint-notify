@@ -49,6 +49,57 @@ type NextWorkQuery struct {
 	Exclude []string
 }
 
+// ClaimNext finds the most urgent unclaimed work face for this identity and
+// takes it, in one pass.
+//
+// This cannot be "NextWork, then claim": every concurrent caller would see the
+// same head of the queue, one would win the claim, and the rest would walk away
+// empty-handed holding a "someone else got it" answer — then have to ask again
+// to discover the next candidate. Six sessions polling at once produced five
+// collisions and dispatched two of six available tasks.
+//
+// Walking candidates in order and taking the first one whose claim UPDATE
+// actually affects a row makes the whole thing a single atomic dispatch: the
+// losers simply continue down the list within the same request.
+func (s *Store) ClaimNext(q NextWorkQuery, who model.Identity) (*NextWork, bool, error) {
+	candidates, err := s.readySides(q, 25, true)
+	if err != nil {
+		return nil, false, err
+	}
+	for i := range candidates {
+		sd := candidates[i]
+		taken, err := s.ClaimSide(sd.TaskID, sd.Key, who)
+		if err != nil {
+			return nil, false, err
+		}
+		if !taken {
+			continue // lost the race for this one; try the next
+		}
+		t, err := s.GetTask(sd.TaskID)
+		if err != nil {
+			return nil, false, err
+		}
+		fresh, err := s.Side(t.ID, sd.Key)
+		if err != nil {
+			return nil, false, err
+		}
+		wasBlocked := sd.Status == model.SideBlocked
+		reason, expl := "assigned", fmt.Sprintf("%s 的 %s 工作面指派给了 @%s，且依赖已就绪", t.Code, sd.Key, fresh.AssigneeRole)
+		if wasBlocked {
+			reason = "unblocked"
+			expl = fmt.Sprintf("%s 的 %s 工作面原本被依赖挡住，现在依赖已完成", t.Code, sd.Key)
+		}
+		return &NextWork{
+			Reason: reason, Explanation: expl, Task: t, Side: &fresh,
+			Dependents: s.dependentsOf(t, sd.Key),
+		}, true, nil
+	}
+	// Nothing claimable — fall back to read-only selection so the caller still
+	// learns about a mention or a task it owns.
+	w, err := s.NextWork(q)
+	return w, false, err
+}
+
 // NextWork returns the single most urgent piece of work for this identity, or
 // (nil, nil) when there is nothing to do.
 //
@@ -163,41 +214,61 @@ func displayName(s *Store, id string) string {
 	return "有人"
 }
 
-// nextReadySide finds a work face addressed to me that nothing is blocking.
-func (s *Store) nextReadySide(q NextWorkQuery) (*NextWork, error) {
-	roleOr, args := rolePredicate(q.Roles)
+// readySides lists every work face addressed to this identity that nothing is
+// blocking, most urgent first.
+//
+// It returns a list rather than a single row because the caller may need to
+// walk past the ones it loses a race for — see ClaimNext.
+func (s *Store) readySides(q NextWorkQuery, limit int, claimableOnly bool) ([]model.Side, error) {
+	roleOr, roleArgs := rolePredicate(q.Roles)
 	if roleOr == "" {
 		return nil, nil
 	}
-	// A side is ready when it is not started, addressed to me, and every
-	// dependency is done. status='blocked' ranks above 'todo' because someone
-	// was actively stuck on it.
-	// The filters have to be in the SQL, not applied to the row LIMIT 1
-	// returned: with a task filter applied afterwards, a work face from another
-	// task would win the ordering and the real answer would be discarded.
-	where := []string{
-		"s.status IN ('blocked','todo')",
-		"(" + roleOr + " OR s.assignee_identity = ?)",
-		`NOT EXISTS (
+
+	// Clauses and their arguments are built together, in the order they will
+	// appear in the SQL. Building them separately is how a placeholder ends up
+	// bound to the wrong value — `d.status <> ?` receiving an identity name
+	// silently matches nothing, and the query returns an empty set that looks
+	// like "no work" rather than a bug.
+	var where []string
+	var args []any
+
+	add := func(clause string, vals ...any) {
+		where = append(where, clause)
+		args = append(args, vals...)
+	}
+
+	add("s.status IN ('blocked','todo')")
+	add("("+roleOr+" OR s.assignee_identity = ?)", append(roleArgs, q.IdentityName)...)
+	add(`NOT EXISTS (
 		   SELECT 1 FROM sides d
 		   WHERE d.task_id = s.task_id AND d.status <> ?
 		     AND d.key IN (SELECT value FROM json_each(s.deps))
-		 )`,
+		 )`, model.SideDone)
+
+	if claimableOnly {
+		// Only unclaimed faces can be taken. A face already owned is not a
+		// candidate for a claim — but it *is* still "work addressed to me" for
+		// the read-only question, which is why this is opt-in.
+		add("s.assignee_identity = ''")
+	} else {
+		add("(s.assignee_identity = ? OR s.assignee_identity = '')", q.IdentityName)
 	}
-	args = append(args, q.IdentityName, model.SideDone)
+
 	if q.TaskCode != "" {
-		where = append(where, "t.code = ?")
-		args = append(args, q.TaskCode)
+		add("t.code = ?", q.TaskCode)
 	}
 	if q.SideKey != "" {
-		where = append(where, "s.key = ?")
-		args = append(args, q.SideKey)
+		add("s.key = ?", q.SideKey)
 	}
 	if n := len(q.Exclude); n > 0 {
-		where = append(where, "t.code NOT IN ("+placeholders(n)+")")
+		add("t.code NOT IN (" + placeholders(n) + ")")
 		for _, c := range q.Exclude {
 			args = append(args, c)
 		}
+	}
+	if limit <= 0 {
+		limit = 25
 	}
 
 	rows, err := s.db.Query(
@@ -205,19 +276,32 @@ func (s *Store) nextReadySide(q NextWorkQuery) (*NextWork, error) {
 		 FROM sides s JOIN tasks t ON t.id = s.task_id
 		 WHERE `+strings.Join(where, " AND ")+`
 		 ORDER BY CASE s.status WHEN 'blocked' THEN 0 ELSE 1 END, s.updated_at ASC
-		 LIMIT 1`, args...)
+		 LIMIT ?`, append(args, limit)...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	if !rows.Next() {
-		return nil, rows.Err()
+	out := []model.Side{}
+	for rows.Next() {
+		sd, err := scanSide(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sd)
 	}
-	sd, err := scanSide(rows)
-	if err != nil {
+	return out, rows.Err()
+}
+
+// nextReadySide is the read-only form: the best single candidate, or nothing.
+func (s *Store) nextReadySide(q NextWorkQuery) (*NextWork, error) {
+	// The read-only path must include faces someone already owns, because the
+	// question it answers is "is anything addressed to me" — not "can I take
+	// something right now".
+	candidates, err := s.readySides(q, 1, false)
+	if err != nil || len(candidates) == 0 {
 		return nil, err
 	}
-	rows.Close()
+	sd := candidates[0]
 	t, err := s.GetTask(sd.TaskID)
 	if err != nil {
 		return nil, err

@@ -61,15 +61,25 @@ func (s *Server) handleNext(w http.ResponseWriter, r *http.Request) {
 		Exclude: parseCSV(q.Get("exclude")),
 	}
 
+	claim := q.Get("claim") == "1" || q.Get("claim") == "true"
+
 	start := time.Now()
 	deadline := start.Add(time.Duration(wait) * time.Second)
 	var (
-		work   *store.NextWork
-		err    error
-		waited int
+		work       *store.NextWork
+		dispatched bool
+		err        error
+		waited     int
 	)
 	for {
-		work, err = s.St.NextWork(query)
+		// claim=1 must dispatch atomically: find-and-take in one pass, else a
+		// burst of same-role sessions all see the same head of the queue and
+		// four of six come back empty-handed.
+		if claim {
+			work, dispatched, err = s.St.ClaimNext(query, actor)
+		} else {
+			work, err = s.St.NextWork(query)
+		}
 		if err != nil {
 			respondError(w, err)
 			return
@@ -112,33 +122,18 @@ func (s *Server) handleNext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Claim before rendering: if two sessions of the same role race for one
-	// work face, exactly one should walk away with it.
-	//
-	// Only work actually addressed to me is claimable. A mention can point at
-	// a side that belongs to another role — that asks for my input, not for me
-	// to take over their work face.
-	claimable := work.Side != nil &&
-		(work.Side.AssigneeIdentity == actor.Name ||
-			(work.Side.AssigneeIdentity == "" &&
-				(work.Side.AssigneeRole == "" || actor.HasRole(work.Side.AssigneeRole))))
-	if (q.Get("claim") == "1" || q.Get("claim") == "true") && claimable {
-		if work.Side != nil {
-			claimed, err := s.St.ClaimSide(work.Task.Code, work.Side.Key, actor)
-			if err != nil {
-				respondError(w, err)
-				return
-			}
-			if claimed {
-				if sd, err := s.St.Side(work.Task.ID, work.Side.Key); err == nil {
-					work.Side = &sd
-				}
-			}
-			base["claimed"] = claimed
+	// `claim=1` means "dispatch me work". ClaimNext already took the face if
+	// there was one to take. A mention is not dispatch — it asks for an answer,
+	// and answering does not transfer ownership of the face it was asked on —
+	// so the response has to say plainly which of the two happened instead of
+	// leaving the caller to infer it from a false-looking boolean.
+	if claim {
+		if dispatched {
+			base["claimed"] = true
+		} else {
+			base["claimed"] = false
+			base["note"] = "这次不是派活，是 " + work.Reason + "；没有认领任何工作面。要接活用 kp claim，或等它被指派给你"
 		}
-	} else if work.Side != nil && (q.Get("claim") == "1" || q.Get("claim") == "true") {
-		base["claimed"] = false
-		base["claim_skipped"] = "这个工作面属于 @" + work.Side.AssigneeRole + "，不是你的；这次是回应提及，不是接活"
 	}
 
 	opt := pack.Options{
@@ -189,14 +184,10 @@ func (s *Server) handleNext(w http.ResponseWriter, r *http.Request) {
 			sb.WriteString("> **别人在等你**：" + strings.Join(work.Dependents, ", ") + "\n")
 		}
 	}
-	if skip, ok := base["claim_skipped"].(string); ok {
-		sb.WriteString("> ⚠️ " + skip + "\n")
-	} else if claimed, ok := base["claimed"].(bool); ok {
-		if claimed {
-			sb.WriteString("> 已认领：这个工作面已记在你名下，别的同角色会话不会重复捡走\n")
-		} else {
-			sb.WriteString("> 未认领成功：已被同角色的另一个会话拿走，做之前先确认\n")
-		}
+	if note, ok := base["note"].(string); ok {
+		sb.WriteString("> ⚠️ " + note + "\n")
+	} else if claimed, ok := base["claimed"].(bool); ok && claimed {
+		sb.WriteString("> 已认领：这个工作面已记在你名下，别的同角色会话不会重复捡走\n")
 	}
 	sb.WriteString("\n---\n\n")
 	sb.WriteString(pack.Markdown(bundle, opt))

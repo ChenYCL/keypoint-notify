@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/light/keypoint-notify/internal/client"
 	"github.com/light/keypoint-notify/internal/config"
@@ -47,6 +48,23 @@ func cmdInit(args []string) int {
 		fmt.Fprintln(os.Stderr, "✗", err)
 		return ExitError
 	}
+
+	// Initialising over an existing binding silently replaces whose identity
+	// this machine is — which is exactly what happens when someone means to add
+	// a second identity and forgets KEYPOINT_HOME. Nothing is blocked (that
+	// would be worse), but the change is announced and the old value is kept.
+	previous, hadConfig := *cfg, config.Exists()
+	if hadConfig && previous.APIKey != "" {
+		if *key != "" && *key != previous.APIKey {
+			fmt.Fprintf(os.Stderr, "⚠ %s 里已经有一个身份（%s）\n", config.Path(), orUnknown(previous.Identity))
+			fmt.Fprintf(os.Stderr, "  这次会用新 key 覆盖它。想同时保留两个身份：\n")
+			fmt.Fprintf(os.Stderr, "    KEYPOINT_HOME=~/.keypoint-%s kp init ...\n", orUnknown(previous.Identity))
+		} else if *key == "" && *server != "" && !*yes {
+			// Interactive run against a server that may differ from the stored one.
+			fmt.Fprintf(os.Stderr, "⚠ 已有配置：%s（身份 %s）\n", previous.Server, orUnknown(previous.Identity))
+		}
+	}
+
 	if *server != "" {
 		cfg.Server = strings.TrimRight(*server, "/")
 	}
@@ -134,6 +152,14 @@ func cmdInit(args []string) int {
 	}
 	cfg.Identity = who.Identity.Name
 	cfg.ActiveRole = who.Role
+	if hadConfig && previous.APIKey != "" && previous.APIKey != cfg.APIKey {
+		backup := config.Path() + ".bak-" + time.Now().Format("20060102-150405")
+		if data, rerr := os.ReadFile(config.Path()); rerr == nil {
+			if werr := os.WriteFile(backup, data, 0o600); werr == nil {
+				fmt.Fprintf(os.Stderr, "  旧配置已备份到 %s\n", backup)
+			}
+		}
+	}
 	if err := cfg.Save(); err != nil {
 		fmt.Fprintln(os.Stderr, "✗ 写配置失败:", err)
 		return ExitError
@@ -312,6 +338,13 @@ func splitCSV(s string) []string {
 		}
 	}
 	return out
+}
+
+func orUnknown(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "未知"
+	}
+	return s
 }
 
 func maskKey(k string) string {
