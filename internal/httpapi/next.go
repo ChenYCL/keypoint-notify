@@ -128,11 +128,18 @@ func (s *Server) handleNext(w http.ResponseWriter, r *http.Request) {
 	// so the response has to say plainly which of the two happened instead of
 	// leaving the caller to infer it from a false-looking boolean.
 	if claim {
-		if dispatched {
+		switch {
+		case dispatched:
 			base["claimed"] = true
-		} else {
+		case work.Side != nil && work.Side.AssigneeIdentity == actor.Name:
+			// Already mine from an earlier round. Nothing was *newly* claimed,
+			// which is different from "someone else has it" — say which.
 			base["claimed"] = false
-			base["note"] = "这次不是派活，是 " + work.Reason + "；没有认领任何工作面。要接活用 kp claim，或等它被指派给你"
+			base["note"] = "这个工作面已经在你名下了，这次没有新的认领动作"
+		default:
+			base["claimed"] = false
+			base["note"] = "这次不是派活，是 " + work.Reason +
+				"；没有认领任何工作面。要接活用 kp claim，或等它被指派给你"
 		}
 	}
 
