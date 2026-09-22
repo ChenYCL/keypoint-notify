@@ -306,3 +306,48 @@ func TestTaskWithoutFacesIsNotAutoClosed(t *testing.T) {
 		t.Errorf("a task with no faces should stay open, got %q", task.Status)
 	}
 }
+
+// A session that has judged an item not-its-to-take needs a way to move on.
+// Without it the same item is offered forever and the only escape is to stop
+// asking — which looks like "no work" and hides the rest of the queue.
+func TestNextCanSkipTasks(t *testing.T) {
+	h := newHarness(t)
+	_, keys := setupRelay(t, h)
+
+	// Three independent tasks, all addressed to the same role.
+	mk := func(title string) string {
+		var out struct {
+			Task struct {
+				Code string `json:"code"`
+			} `json:"task"`
+		}
+		h.do("POST", "/api/v1/tasks", map[string]any{
+			"title": title,
+			"sides": []map[string]any{{"key": "fix", "assignee_role": "backend"}},
+		}, &out, http.StatusCreated)
+		return out.Task.Code
+	}
+	a, b, c := mk("任务A"), mk("任务B"), mk("任务C")
+
+	seen := map[string]bool{}
+	for i := 0; i < 3; i++ {
+		w := h.nextAs(keys["backend"], "?exclude="+a+","+b)
+		if w.Work == nil {
+			t.Fatalf("round %d: expected %s once the first two were excluded", i, c)
+		}
+		seen[w.Work.Task.Code] = true
+	}
+
+	w := h.nextAs(keys["backend"], "?exclude="+a)
+	if w.Work == nil {
+		t.Fatal("excluding one of three should still leave work")
+	}
+	if w.Work.Task.Code == a {
+		t.Errorf("excluded task %s was still offered", a)
+	}
+
+	w = h.nextAs(keys["backend"], "?exclude="+a+","+b+","+c)
+	if w.Work != nil && (w.Work.Task.Code == a || w.Work.Task.Code == b || w.Work.Task.Code == c) {
+		t.Errorf("all three were excluded but %s came back", w.Work.Task.Code)
+	}
+}

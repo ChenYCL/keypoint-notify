@@ -27,6 +27,7 @@ func (a *app) next(args []string) int {
 	claim := fs.Bool("claim", false, "拿到工作面时原子认领，避免同角色会话重复捡")
 	side := fs.String("side", "", "只看某个工作面")
 	task := fs.String("task", "", "只看某个任务")
+	exclude := fs.String("exclude", "", "跳过的任务号，逗号分隔（这次不想接的）")
 	maxChars := fs.Int("max-chars", 0, "上下文包上限，默认 12000")
 	reports := fs.Int("reports", 3, "附带最近 N 条上报")
 	cursorOnly := fs.Bool("cursor-only", false, "只打印游标（脚本/循环里取用）")
@@ -38,6 +39,7 @@ func (a *app) next(args []string) int {
   kp next --wait 30              没有活时挂起最多 30 秒（长轮询，推荐）
   kp next --claim                拿到工作面就原子认领，同角色的别人不会再捡走
   kp next --since 128            接着上一轮的游标继续
+  kp next --exclude KP-14        跳过这个（这次不想接的，可逗号分隔多个）
   kp next --json                 结构化：{work, pack, cursor}
   kp next --cursor-only          只输出游标
 
@@ -74,6 +76,7 @@ reason 的取值：
 		"since", *since,
 		"side", *side,
 		"task", *task,
+		"exclude", *exclude,
 		"max_chars", itoaOrEmpty(*maxChars),
 		"reports", itoaOrEmpty(*reports),
 		"claim", boolQ(*claim),
@@ -135,6 +138,7 @@ func (a *app) loop(args []string) int {
 	claim := fs.Bool("claim", true, "自动认领拿到的工作面")
 	side := fs.String("side", "", "只看某个工作面")
 	task := fs.String("task", "", "只看某个任务")
+	exclude := fs.String("exclude", "", "跳过的任务号，逗号分隔（这次不想接的）")
 	interval := fs.Int("interval", 1, "两条之间的最小间隔秒数")
 	fs.Usage = func() {
 		fmt.Print(`kp loop — 一直等活、拿到就打印（可选执行命令）
@@ -159,7 +163,7 @@ Ctrl-C 退出。每拿到一条，游标自动前进，不会重复。
 	for {
 		path := "/api/v1/me/next" + client.Q(
 			"wait", itoaOrEmpty(*wait), "since", cursor,
-			"side", *side, "task", *task, "claim", boolQ(*claim),
+			"side", *side, "task", *task, "exclude", *exclude, "claim", boolQ(*claim),
 		)
 		var envelope struct {
 			Cursor int64          `json:"cursor"`

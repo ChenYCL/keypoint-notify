@@ -55,6 +55,10 @@ func (s *Server) handleNext(w http.ResponseWriter, r *http.Request) {
 		Since:        since,
 		SideKey:      strings.TrimSpace(q.Get("side")),
 		TaskCode:     strings.TrimSpace(q.Get("task")),
+		// A session that has decided a particular item is not its to take needs
+		// a way to say so. Without this it is offered the same item forever and
+		// the only escape is to stop asking.
+		Exclude: parseCSV(q.Get("exclude")),
 	}
 
 	start := time.Now()

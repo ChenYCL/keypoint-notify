@@ -44,6 +44,9 @@ type NextWorkQuery struct {
 	// SideKey and TaskCode narrow the search; empty means all.
 	SideKey  string
 	TaskCode string
+	// Exclude lists task codes to skip, so a session that has judged an item
+	// not-its-to-take can move on instead of being offered it forever.
+	Exclude []string
 }
 
 // NextWork returns the single most urgent piece of work for this identity, or
@@ -103,6 +106,12 @@ func (s *Store) nextMention(q NextWorkQuery) (*NextWork, error) {
 	if q.SideKey != "" {
 		where = append(where, "r.side_id = (SELECT id FROM sides WHERE key = ? AND task_id = r.task_id)")
 		args = append(args, q.SideKey)
+	}
+	if n := len(q.Exclude); n > 0 {
+		where = append(where, "r.task_id NOT IN (SELECT id FROM tasks WHERE code IN ("+placeholders(n)+"))")
+		for _, c := range q.Exclude {
+			args = append(args, c)
+		}
 	}
 	rows, err := s.db.Query(
 		`SELECT `+prefixCols(reportCols, "r")+` FROM reports r
@@ -184,6 +193,12 @@ func (s *Store) nextReadySide(q NextWorkQuery) (*NextWork, error) {
 		where = append(where, "s.key = ?")
 		args = append(args, q.SideKey)
 	}
+	if n := len(q.Exclude); n > 0 {
+		where = append(where, "t.code NOT IN ("+placeholders(n)+")")
+		for _, c := range q.Exclude {
+			args = append(args, c)
+		}
+	}
 
 	rows, err := s.db.Query(
 		`SELECT `+prefixCols(sideCols, "s")+`
@@ -229,6 +244,12 @@ func (s *Store) nextOwned(q NextWorkQuery) (*NextWork, error) {
 	if q.SideKey != "" {
 		where = append(where, "EXISTS (SELECT 1 FROM sides s WHERE s.task_id = t.id AND s.key = ?)")
 		args = append(args, q.SideKey)
+	}
+	if n := len(q.Exclude); n > 0 {
+		where = append(where, "t.code NOT IN ("+placeholders(n)+")")
+		for _, c := range q.Exclude {
+			args = append(args, c)
+		}
 	}
 	rows, err := s.db.Query(
 		`SELECT `+taskCols+` FROM tasks t

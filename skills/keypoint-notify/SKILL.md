@@ -226,6 +226,7 @@ kp next --wait 30 --claim
 | `--wait 30` | 没有活时在服务端挂起最多 30 秒（长轮询）。**用它，不要 `sleep 5` 循环轮询** |
 | `--claim` | 拿到属于我的工作面就原子认领；同角色的多个会话只有一个能抢到 |
 | `--task KP-12 --side ui` | 收窄到某个任务/工作面 |
+| `--exclude KP-14` | 跳过某个任务。判定"这不归我接"时用它，否则会被永远推同一件 |
 | `--json` | 结构化：`{work:{reason,explanation,task,side,dependents}, cursor, claimed, pack}` |
 | `--cursor-only` | 只输出游标（脚本里取用） |
 
