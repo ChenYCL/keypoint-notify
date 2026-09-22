@@ -1,0 +1,13 @@
+# Build output
+/kp
+/dist/
+
+# Runtime data: SQLite database and uploaded blobs
+/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Local env
+.env
+.env.local

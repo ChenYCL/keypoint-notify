@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keypoint</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>📍</text></svg>">
+</head>
+<body>
+
+<!-- Login gate. Shown until a key is exchanged for a session cookie. -->
+<div id="gate" class="gate" hidden>
+  <form class="gate-card" id="gate-form">
+    <div class="gate-mark">📍</div>
+    <h1>Keypoint</h1>
+    <p class="muted">任务中枢。粘贴你的 API key 进入。</p>
+    <input type="password" id="gate-key" placeholder="kp_..." autocomplete="off" spellcheck="false" autofocus>
+    <button type="submit" class="btn primary wide">进入</button>
+    <p class="gate-error" id="gate-error" hidden></p>
+    <p class="muted small">没有 key？在服务器上跑 <code>kp init</code> 创建第一个身份。</p>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <header class="topbar">
+    <a class="brand" href="/" data-link><span class="brand-mark">📍</span> Keypoint</a>
+    <nav class="nav">
+      <a href="/" data-link data-nav="board">看板</a>
+      <a href="/inbox" data-link data-nav="inbox">收件箱 <span class="badge" id="nav-unread" hidden>0</span></a>
+      <a href="/admin" data-link data-nav="admin">管理</a>
+    </nav>
+    <div class="topbar-right">
+      <input id="search" class="search" type="search" placeholder="搜 code / 标题 / 正文…" autocomplete="off">
+      <button class="chip identity-chip" id="identity-chip" title="当前身份与角色"></button>
+    </div>
+  </header>
+
+  <main id="view" class="view"></main>
+</div>
+
+<!-- Identity popover -->
+<div id="identity-pop" class="pop" hidden>
+  <div id="identity-pop-body"></div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

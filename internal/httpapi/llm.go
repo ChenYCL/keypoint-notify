@@ -1,0 +1,408 @@
+package httpapi
+
+import (
+	"fmt"
+	"net/http"
+	"strings"
+
+	"github.com/light/keypoint-notify/internal/model"
+	"github.com/light/keypoint-notify/internal/pack"
+	"github.com/light/keypoint-notify/internal/store"
+)
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/whoami
+// ---------------------------------------------------------------------------
+
+// handleWhoami is the handshake every agent should perform first: it answers
+// "who am I, what roles do I hold, and what should I do next" in one call, and
+// its `capabilities` list is what tells a model which endpoints are worth
+// reaching for.
+func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
+	actor := identity(r)
+	unread, err := s.St.UnreadCount(actor.ID)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	sides, err := s.St.SidesForRole(actor.ActiveRole, "")
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	writeOK(w, map[string]any{
+		"identity":     actor,
+		"role":         actor.ActiveRole,
+		"unread":       unread,
+		"open_sides":   len(sides),
+		"capabilities": whoamiCapabilities(actor),
+		"entry_points": []string{
+			"GET /api/v1/me/board            我手上有什么",
+			"GET /api/v1/inbox?unread=1      未读上报",
+			"GET /api/v1/tasks?assigned=me   指派给我的任务",
+			"GET /api/v1/tasks/{code}/pack   开工上下文包（可直接喂给模型）",
+			"POST /api/v1/tasks/{code}/reports  上报进展/阻塞/结果",
+			"GET /api/v1/llms.txt            完整 API 说明",
+		},
+		"note": "写操作会以你的 active_role 归属；要在某次写入里用别的角色，传 \"role\": \"<key>\"",
+	})
+}
+
+func whoamiCapabilities(actor model.Identity) []string {
+	caps := []string{"task:read", "task:write", "report:create", "file:upload"}
+	if actor.HasRole("admin") {
+		caps = append(caps, "identity:admin", "role:admin", "webhook:admin", "task:delete")
+	}
+	return caps
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/tasks/{code}/pack
+// ---------------------------------------------------------------------------
+
+// handleTaskPack is the endpoint the whole design exists to make possible: one
+// call returns a paste-ready context bundle covering the task, the requested
+// work face, the recent timeline, and the contract for reporting back.
+//
+//	A coding agent's entire bootstrap is:
+//	    curl -H "Authorization: Bearer $KP_KEY" "$KP/pack?..."
+func (s *Server) handleTaskPack(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	code := r.PathValue("code")
+	t, err := s.St.GetTask(code)
+	if err != nil {
+		respondError(w, s.taskNotFound(code, err))
+		return
+	}
+
+	opt := pack.Options{
+		SideKey:      strings.TrimSpace(q.Get("side")),
+		MaxChars:     atoiOr(q.Get("max_chars"), pack.DefaultMaxChars),
+		Reports:      atoiOr(q.Get("reports"), 5),
+		IncludeEmpty: q.Get("empty") == "1" || q.Get("empty") == "true",
+	}
+	if q.Get("reports") == "0" || q.Get("reports") == "none" {
+		opt.Reports = 0
+	}
+	if opt.SideKey != "" {
+		if _, err := s.St.Side(t.ID, opt.SideKey); err != nil {
+			respondError(w, s.sideNotFound(t, opt.SideKey))
+			return
+		}
+	}
+
+	var reports []model.Report
+	if opt.Reports > 0 {
+		reports, err = s.St.ListReports(store.ReportFilter{TaskCode: t.Code, Limit: opt.Reports})
+		if err != nil {
+			respondError(w, err)
+			return
+		}
+	}
+
+	actor := identity(r)
+	role := actor.ActiveRole
+	if opt.SideKey != "" {
+		if sd, err := s.St.Side(t.ID, opt.SideKey); err == nil && sd.AssigneeRole != "" {
+			role = sd.AssigneeRole
+		}
+	}
+	b := pack.Build(t, reports, role, opt)
+
+	if q.Get("format") == "json" {
+		writeOK(w, b)
+		return
+	}
+	// Markdown is the default because its consumer is a prompt, and a prompt
+	// wants prose with headings rather than a JSON envelope to unwrap.
+	writeText(w, http.StatusOK, "text/markdown", pack.Markdown(b, opt))
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/llms.txt
+// ---------------------------------------------------------------------------
+
+// handleLLMsTxt serves a plain-text API manual, in the emerging /llms.txt
+// convention. It is deliberately static prose rather than generated JSON: a
+// model reads it once at bootstrap and then knows which endpoints to hit,
+// which enums exist, and how errors are shaped — without reading source.
+func (s *Server) handleLLMsTxt(w http.ResponseWriter, r *http.Request) {
+	writeText(w, http.StatusOK, "text/plain", llmsTxt(s.baseFor(r)))
+}
+
+func (s *Server) baseFor(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	host := r.Host
+	if host == "" {
+		host = "127.0.0.1:8787"
+	}
+	return scheme + "://" + host
+}
+
+func llmsTxt(base string) string {
+	return fmt.Sprintf(`# Keypoint Notify — API 说明（给 LLM / agent 读的版本）
+
+base_url: %s
+auth:     Authorization: Bearer kp_...    （或 X-API-Key: kp_...）
+docs:     本文档是机器可读的权威说明；/api/v1/schema 是同一份内容的 JSON 形式。
+
+## 这个系统是干什么的
+
+一个任务中枢。人用浏览器看板；Claude Code 之类的 agent 通过 HTTP API
+上报进展、拉取任务上下文、认领工作面。核心概念：
+
+  Task     任务，短代号 KP-<n>，有 status / priority / kind / owner_role
+  Segment  分段，任务的细节切片，每段有稳定 key，可单独取用（这是"可复制"的单位）
+  Side     工作面，一个任务可并行拆成几块（api / ui / review ...），
+           每块有自己的负责人角色、状态、依赖和分段
+  Report   上报，只增不改的时间线条目：progress | blocker | decision | handoff | result | question
+  Identity 身份，一个 API key 对应一个身份；身份持有若干 role，可改绑、可轮换 key
+  Event    事件，一切变更都产生事件；驱动收件箱、webhook、SSE
+
+## 最重要的一条：先拿 pack
+
+要做任何一个任务，第一步永远是：
+
+  GET /api/v1/tasks/{code}/pack?side={side_key}&format=md
+
+返回一份自包含的 markdown：任务头、分段索引、工作面表、每段正文、最近上报、
+附件链接，以及**交付契约**（完成后该调哪个接口上报）。把这段文本直接作为
+prompt 上下文交给模型即可开工。
+
+参数：
+  side=<key>        聚焦某个工作面（省略则给全任务）
+  max_chars=<n>     上限，默认 12000；超限会截断并在文末说明遗漏了哪些段
+  reports=<n>       附带最近 n 条上报，默认 5；0 = 不带
+  format=md|json    md（默认）给模型看；json 给程序用
+  empty=1           带上还没写内容的固定分段（默认省略）
+
+## 固定分段 key（骨架）
+
+  context      背景
+  goal         目标
+  deliverable  交付物
+  constraint   约束
+  acceptance   验收标准
+  interface    接口/契约
+  files        相关文件
+
+这些 key 在任务创建时就存在（可能为空），所以永远可以用 key 取，不必先列。
+自由分段自己起 key（中文会保留，空格转成 -）。取单段：
+
+  GET /api/v1/tasks/{code}/segments/{key}            → 纯文本
+  GET /api/v1/tasks/{code}/segments/{key}?format=prompt  → 带上下文的可粘贴片段
+
+## 读写端点
+
+读（全部支持 JSON，默认过滤为空即列出）：
+  GET  /api/v1/whoami                          我是谁、我有什么角色、有多少未读
+  GET  /api/v1/me/board                        我手上的工作面+我负责的任务
+  GET  /api/v1/inbox?unread=1                  我的未读上报
+  GET  /api/v1/tasks?assigned=me               指派给我的
+  GET  /api/v1/tasks?role=backend&status=doing,blocked&since=7d&q=验证码&limit=20
+  GET  /api/v1/tasks/{code}                    单任务全量（含分段、工作面、附件）
+  GET  /api/v1/tasks/{code}/pack               开工上下文包 ★
+  GET  /api/v1/tasks/{code}/segments           全部分段
+  GET  /api/v1/tasks/{code}/segments/{key}     单段正文
+  GET  /api/v1/tasks/{code}/sides              工作面列表
+  GET  /api/v1/tasks/{code}/reports?limit=20   时间线
+  GET  /api/v1/events?since=<cursor>           事件流（轮询）
+  GET  /api/v1/stream?since=<cursor>           SSE
+  GET  /api/v1/roles?keys=1                    合法角色 key 列表
+  GET  /api/v1/roles?holders=1                 角色 → 谁持有
+  GET  /api/v1/identities?names=1              可指派身份名列表
+  GET  /api/v1/files/{id}                      附件（图片 inline 预览）
+
+写：
+  POST   /api/v1/tasks                         建任务（可一次带 segments + sides）
+  PATCH  /api/v1/tasks/{code}                  改元数据
+  DELETE /api/v1/tasks/{code}                  删任务（需 admin）
+  POST   /api/v1/tasks/{code}/segments         写/追加分段 {"key":"goal","body":"..."}
+  DELETE /api/v1/tasks/{code}/segments/{key}
+  POST   /api/v1/tasks/{code}/sides            加工作面 {"key":"ui","assignee_role":"frontend","deps":["api"]}
+  PATCH  /api/v1/tasks/{code}/sides/{key}      改工作面（指派/状态/依赖）
+  DELETE /api/v1/tasks/{code}/sides/{key}
+  POST   /api/v1/tasks/{code}/reports          上报 ★
+  POST   /api/v1/files                         multipart 上传，字段名 file
+  POST   /api/v1/tasks/{code}/files            直接挂到任务上
+  POST   /api/v1/inbox/read                    {"ids":[...]}，空数组=全部已读
+
+## 上报怎么调
+
+  POST /api/v1/tasks/KP-12/reports
+  {
+    "type": "blocker",            // progress|blocker|decision|handoff|result|question
+    "side_key": "ui",             // 可选：归属于某个工作面
+    "body": "iOS 上 visibilitychange 不触发，需要改成 pagehide",
+    "segments": [                 // 可选：结构化片段
+      {"key": "repro", "title": "复现步骤", "body": "1. ...\n2. ..."}
+    ],
+    "mentions": ["@backend", "review"],   // 身份名或角色 key，都会被通知
+    "attachments": ["fil_xxx"],           // 先 POST /api/v1/files 拿到的 id
+    "status": "blocked"                   // 可选：同时把任务状态也改掉
+  }
+
+副作用（可预期，不要重复做）：
+  - type=blocker 且带 side_key  → 该工作面状态自动变 blocked
+  - type=progress/result 且该面还是 todo → 自动变 doing
+  - mentions 里的人会收到站内未读；任务 watcher 和该面负责人也会收到
+
+## 枚举
+
+kind:      bug | feature | chore | research | review | incident
+status:    inbox | ready | doing | blocked | review | done | archived
+side 状态:  todo | doing | blocked | done
+priority:  P0 | P1 | P2 | P3
+report:    progress | blocker | decision | handoff | result | question
+event:     %s
+
+## 错误怎么长
+
+所有错误都是同一个形状，并且**带恢复线索**：
+
+  {
+    "error": "segment_not_found",
+    "message": "任务 KP-12 没有分段 \"accepance\"",
+    "hint": "单段取全文：kp task seg KP-12 <key>；列全部：kp task show KP-12",
+    "did_you_mean": "acceptance",
+    "options": ["context","goal","deliverable","acceptance","interface","files"],
+    "docs": "/api/v1/llms.txt"
+  }
+
+常见 error 值：missing_api_key / invalid_api_key / task_not_found /
+segment_not_found / side_not_found / file_not_found / near_miss_skeleton_key /
+bad_status / bad_report_type / bad_priority / bad_time / conflict / forbidden /
+file_too_large / invalid_json
+
+读到 did_you_mean / options 就照着改参数重试，不要放弃也不要猜。
+
+## 时间参数
+
+since / updated_since 接受：RFC3339、日期（2026-09-01）、相对量（7d / 24h / 90m / 30s）。
+
+## 幂等与重试
+
+写操作都可以安全重试：URL 里的 {code} 是稳定的，重复创建同名任务会返回
+conflict 而不是建出两条。上报是追加语义，重试会真的写两条——不确定前一次
+是否成功时，先 GET /api/v1/tasks/{code}/reports?limit=3 看一眼再决定。
+
+## 建议的 agent 循环
+
+1. GET /whoami                      → 确认身份、角色、未读数
+2. GET /me/board                    → 拿到手上的工作面
+3. GET /tasks/{code}/pack?side=X    → 拿上下文包，开工
+4. （干活）
+5. POST /tasks/{code}/reports       → 上报结果 / 阻塞 / 提问
+6. GET /events?since=<cursor>       → 保持轮询，拿别人的回应
+
+## 网页界面
+
+  %s/            看板（任务优先）
+  %s/t/KP-12     任务详情；每个分段卡片右上有独立复制按钮
+  %s/inbox       收件箱
+  %s/admin       身份 / 角色 / webhook 管理
+`,
+		base, strings.Join(store.AllEventTypes, " | "),
+		base, base, base, base)
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/schema
+// ---------------------------------------------------------------------------
+
+// handleSchema returns the same contract as llms.txt in JSON, for callers that
+// would rather parse than read prose. It is generated from the same constants
+// the handlers validate against, so it cannot drift.
+func (s *Server) handleSchema(w http.ResponseWriter, r *http.Request) {
+	writeOK(w, map[string]any{
+		"base_url": s.baseFor(r),
+		"auth": map[string]any{
+			"headers": []string{"Authorization: Bearer kp_...", "X-API-Key: kp_..."},
+			"how_to_get_a_key": []string{
+				"空系统：POST /api/v1/bootstrap {\"name\":\"...\"}",
+				"已有系统：由 admin POST /api/v1/identities，或用 `kp init`",
+			},
+		},
+		"concepts": map[string]string{
+			"task":     "任务，短代号 KP-<n>",
+			"segment":  "任务的细节切片，稳定 key，可单独取用（可复制的单位）",
+			"side":     "工作面，一个任务并行拆成若干块，各带负责人/状态/依赖/分段",
+			"report":   "上报，只增时间线",
+			"identity": "API key 对应的身份，持有若干 role",
+			"event":    "变更事件，驱动收件箱/webhook/SSE",
+		},
+		"enums": map[string][]string{
+			"kind":                  taskKindOptions(),
+			"task_status":           {model.StatusInbox, model.StatusReady, model.StatusDoing, model.StatusBlocked, model.StatusReview, model.StatusDone, model.StatusArchived},
+			"side_status":           {model.SideTodo, model.SideDoing, model.SideBlocked, model.SideDone},
+			"priority":              model.Priorities,
+			"report_type":           reportTypeOptions(),
+			"event_type":            store.AllEventTypes,
+			"skeleton_segment_keys": model.SkeletonKeys,
+		},
+		"skeleton_titles": model.SkeletonTitles,
+		"error_shape": map[string]any{
+			"fields": []string{"error", "message", "hint", "did_you_mean", "options", "field", "docs"},
+			"note":   "error 是稳定机器码；did_you_mean/options 用于自我纠正后重试",
+			"codes": []string{"missing_api_key", "invalid_api_key", "task_not_found",
+				"segment_not_found", "side_not_found", "file_not_found",
+				"near_miss_skeleton_key", "bad_status", "bad_report_type", "bad_priority",
+				"bad_time", "conflict", "forbidden", "file_too_large", "invalid_json",
+				"already_bootstrapped", "missing_api_key"},
+		},
+		"time_params": map[string]any{
+			"accepted": []string{"RFC3339", "YYYY-MM-DD", "相对量 7d/24h/90m/30s"},
+			"used_by":  []string{"since", "updated_since"},
+		},
+		"endpoints": []map[string]any{
+			{"method": "GET", "path": "/api/v1/whoami", "desc": "身份、角色、未读数、入口提示"},
+			{"method": "GET", "path": "/api/v1/me/board", "desc": "我手上的工作面 / 我负责的任务"},
+			{"method": "GET", "path": "/api/v1/inbox", "params": []string{"unread=1", "limit"}, "desc": "我的收件箱"},
+			{"method": "POST", "path": "/api/v1/inbox/read", "desc": "标记已读，空 ids = 全部"},
+			{"method": "GET", "path": "/api/v1/tasks", "params": []string{"assigned=me", "role", "status", "kind", "priority", "label", "q", "since", "updated_since", "view=lite", "group=status", "limit", "offset", "archived"}, "desc": "任务查询"},
+			{"method": "POST", "path": "/api/v1/tasks", "desc": "建任务（可带 segments/sides/watchers/notify）"},
+			{"method": "GET", "path": "/api/v1/tasks/{code}", "desc": "单任务全量"},
+			{"method": "PATCH", "path": "/api/v1/tasks/{code}", "desc": "改元数据（status 变 done 会关闭所有工作面）"},
+			{"method": "DELETE", "path": "/api/v1/tasks/{code}", "desc": "删任务（admin）"},
+			{"method": "GET", "path": "/api/v1/tasks/{code}/pack", "params": []string{"side", "max_chars", "reports", "format=md|json", "empty"}, "desc": "★ 开工上下文包"},
+			{"method": "GET", "path": "/api/v1/tasks/{code}/segments", "desc": "全部分段"},
+			{"method": "POST", "path": "/api/v1/tasks/{code}/segments", "desc": "写/追加分段 {key,title,body,side_key,format,append}"},
+			{"method": "GET", "path": "/api/v1/tasks/{code}/segments/{key}", "params": []string{"format=text|json|prompt"}, "desc": "单段正文"},
+			{"method": "DELETE", "path": "/api/v1/tasks/{code}/segments/{key}", "desc": "清空/删除分段（骨架只清空）"},
+			{"method": "GET", "path": "/api/v1/tasks/{code}/sides", "params": []string{"assignable=1"}, "desc": "工作面列表"},
+			{"method": "POST", "path": "/api/v1/tasks/{code}/sides", "desc": "加工作面"},
+			{"method": "PATCH", "path": "/api/v1/tasks/{code}/sides/{key}", "desc": "改工作面（指派/状态/依赖，unassign=true 取消指派）"},
+			{"method": "DELETE", "path": "/api/v1/tasks/{code}/sides/{key}", "desc": "删工作面"},
+			{"method": "GET", "path": "/api/v1/tasks/{code}/reports", "params": []string{"side", "type", "limit", "offset"}, "desc": "任务时间线"},
+			{"method": "POST", "path": "/api/v1/tasks/{code}/reports", "desc": "★ 上报"},
+			{"method": "GET", "path": "/api/v1/reports", "params": []string{"task", "type", "since", "limit"}, "desc": "跨任务上报流"},
+			{"method": "GET", "path": "/api/v1/tasks/{code}/events", "desc": "单任务事件"},
+			{"method": "GET", "path": "/api/v1/events", "params": []string{"since", "type", "limit", "backlog=1"}, "desc": "事件流（带 cursor）"},
+			{"method": "GET", "path": "/api/v1/stream", "params": []string{"since", "type", "task"}, "desc": "SSE 实时流"},
+			{"method": "POST", "path": "/api/v1/files", "desc": "multipart 上传（字段 file），返回 id+url+markdown"},
+			{"method": "GET", "path": "/api/v1/files/{id}", "desc": "取附件；图片 inline"},
+			{"method": "GET", "path": "/api/v1/roles", "params": []string{"keys=1", "holders=1"}, "desc": "角色"},
+			{"method": "GET", "path": "/api/v1/identities", "params": []string{"names=1"}, "desc": "身份"},
+			{"method": "POST", "path": "/api/v1/identities", "desc": "建身份（admin），返回一次性 key"},
+			{"method": "PATCH", "path": "/api/v1/identities/{id}", "desc": "改名字/角色/激活角色/停用（改角色需 admin）"},
+			{"method": "POST", "path": "/api/v1/identities/{id}/rotate", "desc": "轮换 key，旧的立即失效"},
+			{"method": "GET", "path": "/api/v1/webhooks", "desc": "webhook 列表 + 事件词表"},
+			{"method": "POST", "path": "/api/v1/webhooks", "desc": "建/改 webhook"},
+			{"method": "DELETE", "path": "/api/v1/webhooks/{id}", "desc": "删 webhook"},
+		},
+		"agent_loop": []string{
+			"GET /whoami", "GET /me/board", "GET /tasks/{code}/pack?side=X",
+			"（干活）", "POST /tasks/{code}/reports", "GET /events?since=<cursor>",
+		},
+		"gotchas": []string{
+			"重试上报会写两条：不确定时先 GET reports?limit=1 核对",
+			"任务 status 变 done/archived 会把所有未完成工作面置为 done",
+			"骨架分段不能被删除，只能清空——key 永远可取",
+			"上传后要显式带 attachments:[id] 或把 markdown 贴进分段正文，否则附件只是挂任务上",
+			"key 只在创建/轮换时显示一次；丢了只能轮换",
+		},
+	})
+}
