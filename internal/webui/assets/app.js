@@ -41,13 +41,45 @@ async function api(method, path, body, raw) {
 
 // ----------------------------------------------------------------- toast
 let toastTimer = null;
+let toastSpring = null;
+let toastState = null;
+
+/* Toasts rise into place under a spring and are interruptible: a second toast
+ * arriving mid-flight retargets from where the first one is, rather than
+ * restarting from off-screen. Y is owned by the spring — the horizontal
+ * centring lives in CSS so the two never fight over `transform`. */
 function toast(msg, isErr) {
   const el = document.getElementById('toast');
+  if (toastSpring) toastSpring.stop();
+  clearTimeout(toastTimer);
+
+  // Replace the text without restarting the motion if one is already up.
+  const alreadyVisible = !el.hidden;
   el.textContent = msg;
   el.className = 'toast' + (isErr ? ' err' : '');
   el.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, isErr ? 5200 : 2400);
+
+  if (!alreadyVisible) {
+    toastState = { y: 24 };
+    toastSpring = KPMotion.spring({
+      values: toastState,
+      targets: { y: 0 },
+      damping: 0.85, response: 0.32,
+      onUpdate: (v) => { el.style.transform = `translateX(50%) translateY(${v.y}px)`; },
+    });
+  }
+
+  toastTimer = setTimeout(() => {
+    if (el.hidden) return;
+    const st = { y: 0 };
+    toastSpring = KPMotion.spring({
+      values: st,
+      targets: { y: 30 },
+      damping: 1, response: 0.28,
+      onUpdate: (v) => { el.style.transform = `translateX(50%) translateY(${v.y}px)`; },
+      onComplete: () => { el.hidden = true; el.style.transform = ''; },
+    });
+  }, isErr ? 5200 : 2400);
 }
 function fail(err) {
   console.error(err);
@@ -243,10 +275,21 @@ function toggleIdentityPop() {
     '<div class="row"><a class="btn tiny" href="/admin" data-link style="text-align:center">管理身份</a>' +
       '<button class="btn tiny danger" id="pop-logout">退出登录</button></div>';
 
+  // Anchored to its trigger, not parked in a corner: the popover should read
+  // as having come out of the chip. Transform-origin at the chip keeps the
+  // spatial relationship obvious even as the panel scales up.
   const rect = document.getElementById('identity-chip').getBoundingClientRect();
   pop.style.top = (rect.bottom + 8) + 'px';
   pop.style.right = '18px';
+  pop.style.transformOrigin = (rect.left + rect.width / 2 - (window.innerWidth - 18 - 260)) + 'px -8px';
   pop.hidden = false;
+  // Blur and scale together so the surface reads as a material arriving
+  // rather than an opacity ramp.
+  pop.animate(
+    [{ opacity: 0, transform: 'scale(.94)', filter: 'blur(6px)' },
+     { opacity: 1, transform: 'scale(1)', filter: 'blur(0)' }],
+    { duration: 220, easing: 'cubic-bezier(.2,.9,.3,1)', fill: 'both' },
+  );
 
   document.getElementById('pop-role-save').onclick = async () => {
     const role = document.getElementById('pop-role').value;
@@ -302,7 +345,7 @@ function setView(html, narrow) {
 function loading() { setView('<div class="spinner">加载中…</div>'); }
 
 // ----------------------------------------------------------------- board
-async function renderBoard() {
+async function renderBoard(settled) {
   const params = new URLSearchParams({ group: 'status', limit: '300' });
   if (S.filter.q) params.set('q', S.filter.q);
   if (S.filter.role) params.set('role', S.filter.role);
@@ -312,7 +355,9 @@ async function renderBoard() {
   try { data = await api('GET', '/tasks?' + params.toString()); } catch (e) { return fail(e); }
 
   const cols = data.columns || {};
-  let html = '<div class="board" id="board">';
+  // A card that just landed under its own spring must not replay the entry
+  // animation — the second movement would read as the card slipping.
+  let html = '<div class="board' + (settled ? ' no-enter' : '') + '" id="board">';
   for (const col of COLUMNS) {
     const items = cols[col] || [];
     html += '<div class="column" data-status="' + col + '">' +
@@ -336,7 +381,8 @@ function cardHTML(t) {
     '<span class="side-dot ' + esc(s.status) + '" title="' + esc(s.title || s.key) +
     (s.assignee_role ? ' → @' + esc(s.assignee_role) : '') + '">' +
     esc(s.key) + '</span>').join('');
-  return '<div class="card' + (t.unread_count ? ' unread' : '') + '" draggable="true" data-code="' + esc(t.code) + '">' +
+  return '<div class="card' + (t.unread_count ? ' unread' : '') + '" data-code="' + esc(t.code) +
+    '" data-status="' + esc(t.status) + '">' +
     '<div class="card-top">' +
       '<span class="card-code">' + esc(t.code) + '</span>' +
       (t.priority && t.priority !== 'P2' ? '<span class="chip ' + esc(t.priority) + '">' + esc(t.priority) + '</span>' : '') +
@@ -352,41 +398,204 @@ function cardHTML(t) {
   '</div>';
 }
 
+/* Card drag, built on pointer events rather than HTML5 drag-and-drop.
+ *
+ * The platform's DnD gives you a ghost image, no position history, and no
+ * velocity — which makes 1:1 tracking, momentum, and a clean hand-off into the
+ * settle animation all impossible. Everything here exists to get those three.
+ */
+const DRAG_THRESHOLD = 6;      // px before a press becomes a drag (§10 hysteresis)
+const SETTLE_DAMPING = 0.8;    // under-damped: only because a flick preceded it
+const SETTLE_RESPONSE = 0.3;   // sheet/drawer response
+const RETURN_RESPONSE = 0.35;  // a drag that goes nowhere should not dawdle
+
 function wireBoard() {
   const board = document.getElementById('board');
   if (!board) return;
-  board.querySelectorAll('.card').forEach(card => {
-    card.addEventListener('click', () => {
-      const code = card.dataset.code;
-      history.pushState({}, '', '/t/' + encodeURIComponent(code));
-      route();
-    });
-    card.addEventListener('dragstart', (e) => {
-      card.classList.add('dragging');
-      e.dataTransfer.setData('text/plain', card.dataset.code);
-      e.dataTransfer.effectAllowed = 'move';
-    });
-    card.addEventListener('dragend', () => card.classList.remove('dragging'));
+  board.querySelectorAll('.card').forEach(card => attachCardDrag(card, board));
+  wireBoardScrollShade();
+}
+
+// A shadow under the floating bar only where it actually overlaps content.
+function wireBoardScrollShade() {
+  const onScroll = () => document.body.classList.toggle('scrolled', window.scrollY > 2);
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+}
+
+function columnAt(x, y) {
+  const el = document.elementFromPoint(x, y);
+  return el ? el.closest('.column') : null;
+}
+
+function attachCardDrag(card, board) {
+  let d = null;
+
+  // Takes the drag state explicitly rather than reading the mutable outer
+  // `d`: release() clears `d` before the settle spring runs, and a closure
+  // that reads it would throw on every frame of the animation.
+  const place = (state, x, y) => {
+    card.style.transform = `translate3d(${x - state.originX}px, ${y - state.originY}px, 0)`;
+  };
+
+  card.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const rect = card.getBoundingClientRect();
+    d = {
+      startX: e.clientX, startY: e.clientY,
+      originX: rect.left, originY: rect.top,
+      size: { w: rect.width, h: rect.height },
+      // Respect where they grabbed it. Snapping the card to the pointer is the
+      // fastest way to break the illusion of holding something.
+      grabX: e.clientX - rect.left, grabY: e.clientY - rect.top,
+      tracker: KPMotion.tracker(),
+      live: { x: rect.left, y: rect.top },
+      dragging: false, spring: null, placeholder: null, target: null,
+      moved: false,
+    };
+    d.tracker.add(e.clientX, e.clientY, e.timeStamp);
+    try { card.setPointerCapture(e.pointerId); } catch { /* synthetic events */ }
   });
-  board.querySelectorAll('.column').forEach(col => {
-    col.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      col.classList.add('drop-target');
-    });
-    col.addEventListener('dragleave', () => col.classList.remove('drop-target'));
-    col.addEventListener('drop', async (e) => {
-      e.preventDefault();
-      col.classList.remove('drop-target');
-      const code = e.dataTransfer.getData('text/plain');
-      const status = col.dataset.status;
-      if (!code) return;
-      try {
-        await api('PATCH', '/tasks/' + encodeURIComponent(code), { status });
-        toast(code + ' → ' + TASK_STATUS[status]);
-        renderBoard();
-      } catch (err) { fail(err); }
-    });
+
+  card.addEventListener('pointermove', (e) => {
+    if (!d) return;
+    d.tracker.add(e.clientX, e.clientY, e.timeStamp);
+    const dx = e.clientX - d.startX, dy = e.clientY - d.startY;
+
+    if (!d.dragging) {
+      if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+      beginDrag();
+    }
+    d.moved = true;
+    // If a previous settle is still running, grab it back from where it is
+    // rather than letting two animations fight (§3).
+    if (d.spring) { d.spring.stop(); d.spring = null; }
+    d.live.x = e.clientX - d.grabX;
+    d.live.y = e.clientY - d.grabY;
+    place(d, d.live.x, d.live.y);
+    updateTarget(e.clientX, e.clientY);
   });
+
+  function beginDrag() {
+    d.dragging = true;
+    const rect = card.getBoundingClientRect();
+    d.originX = rect.left; d.originY = rect.top;
+    d.live = { x: rect.left, y: rect.top };
+
+    // A dashed gap holds the space so the column does not reflow as the card
+    // leaves it — the layout previews the drop before it happens.
+    const ph = document.createElement('div');
+    ph.className = 'card-placeholder';
+    ph.style.height = rect.height + 'px';
+    card.parentNode.insertBefore(ph, card);
+    d.placeholder = ph;
+    d.homeColumn = card.closest('.column');
+
+    card.classList.add('lifted');
+    card.style.width = rect.width + 'px';
+    card.style.left = rect.left + 'px';
+    card.style.top = rect.top + 'px';
+    card.style.transform = 'translate3d(0,0,0)';
+  }
+
+  // The column the card will land in, chosen from the *projected* endpoint
+  // rather than the pointer — that is what makes a flick throw the card.
+  function updateTarget(cx, cy) {
+    const v = d.tracker.velocity();
+    const projectedX = cx + KPMotion.project(v.x);
+    const col = columnAt(projectedX, cy) || columnAt(cx, cy);
+    if (!col) return;
+    if (d.target === col) return;
+    d.target = col;
+    board.querySelectorAll('.column').forEach(c =>
+      c.classList.toggle('drop-target', c === col));
+    col.appendChild(d.placeholder);
+    autoscroll(cx);
+  }
+
+  // Dragging toward an off-screen column has to be able to reach it.
+  function autoscroll(x) {
+    const r = board.getBoundingClientRect();
+    const margin = 60;
+    if (x < r.left + margin) board.scrollLeft -= 14;
+    else if (x > r.right - margin) board.scrollLeft += 14;
+  }
+
+  const release = (e, cancelled) => {
+    if (!d) return;
+    const wasDragging = d.dragging;
+    const v = d.tracker.velocity();
+    const dd = d;
+    d = null;
+    if (!wasDragging) {
+      if (!cancelled && e.type === 'pointerup') openTask(card.dataset.code);
+      return;
+    }
+    settle(dd, v, cancelled);
+  };
+
+  card.addEventListener('pointerup', (e) => release(e, false));
+  card.addEventListener('pointercancel', (e) => release(e, true));
+
+  function settle(dd, v, cancelled) {
+    // A cancelled gesture and one that never left home are the same case: go
+    // back to where it started, straight there, no bounce.
+    const col = cancelled || dd.target === dd.homeColumn ? null : dd.target;
+
+    // Where the card should come to rest. Inside the new column it lands at
+    // the placeholder's slot; otherwise it goes home.
+    let targetX, targetY;
+    if (col) {
+      const anchor = document.createElement('div');
+      anchor.style.height = dd.size.h + 'px';
+      anchor.style.marginBottom = '7px';
+      col.appendChild(anchor);
+      const r = anchor.getBoundingClientRect();
+      targetX = r.left; targetY = r.top;
+      anchor.remove();
+    } else {
+      targetX = dd.originX; targetY = dd.originY;
+    }
+
+    const spring = KPMotion.spring({
+      values: dd.live,
+      targets: { x: targetX, y: targetY },
+      // Hand the finger's velocity to the animation. Without this the card
+      // visibly stops at release and then starts moving again — the seam that
+      // separates "fluid" from "fine".
+      velocity: { x: v.x, y: v.y },
+      damping: col ? SETTLE_DAMPING : 1.0,
+      response: col ? SETTLE_RESPONSE : RETURN_RESPONSE,
+      onUpdate: (val) => place(dd, val.x, val.y),
+      onComplete: () => finish(dd, col),
+    });
+    dd.spring = spring;
+  }
+
+  function finish(dd, col) {
+    card.classList.remove('lifted');
+    card.style.cssText = '';
+    dd.placeholder.remove();
+    board.querySelectorAll('.column').forEach(c => c.classList.remove('drop-target'));
+
+    const want = col ? col.dataset.status : null;
+    const from = card.dataset.status;
+    if (!want || want === from) {
+      renderBoard(true);
+      return;
+    }
+    api('PATCH', '/tasks/' + encodeURIComponent(card.dataset.code), { status: want })
+      .then(() => {
+        toast(card.dataset.code + ' → ' + TASK_STATUS[want]);
+        renderBoard(true);
+      })
+      .catch((err) => { fail(err); renderBoard(true); });
+  }
+}
+
+function openTask(code) {
+  history.pushState({}, '', '/t/' + encodeURIComponent(code));
+  route();
 }
 
 // ------------------------------------------------------------ task detail

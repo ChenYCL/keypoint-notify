@@ -26,6 +26,18 @@
 
   --radius:    10px;
   --radius-sm: 6px;
+
+  /* Motion. Set as CSS vars too so non-gesture transitions (hover, focus)
+   * can share the feel; anything the user can drag goes through the JS
+   * spring instead, because only a spring can be interrupted. */
+  --press:     100ms;
+  --ease-out:  cubic-bezier(.2, .8, .3, 1);
+
+  /* Translucent material. Chrome floats over content rather than consuming a
+   * bar's worth of it; --scrim is the dimming layer under it. */
+  --chrome:    rgba(22, 27, 35, .72);
+  --chrome-edge: rgba(255, 255, 255, .06);
+  --blur:      20px;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
           "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
@@ -42,7 +54,15 @@ html, body {
   font-size: 14px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
+  font-optical-sizing: auto;
 }
+
+/* Tracking is a function of size, not a house style: large text reads too
+ * loose as it grows (pull it in), small text needs a touch of air. */
+h1 { letter-spacing: -0.021em; line-height: 1.15; }
+h2, h3, h4 { letter-spacing: -0.012em; line-height: 1.25; }
+.small, .chip, .card-code, .seg-key { letter-spacing: 0.006em; }
+.card-title { letter-spacing: -0.006em; }
 
 a { color: inherit; text-decoration: none; }
 code, pre, .mono { font-family: var(--mono); font-size: 0.92em; }
@@ -83,11 +103,15 @@ p { margin: 0.5em 0; }
 
 /* ------------------------------------------------------------- topbar */
 
+/* Translucent chrome: content scrolls *under* the bar rather than stopping at
+ * it, which keeps more of the board visible without stealing a strip. */
 .topbar {
   display: flex; align-items: center; gap: 18px;
   height: 52px; padding: 0 18px;
-  background: var(--bg-raised);
-  border-bottom: 1px solid var(--line);
+  background: var(--chrome);
+  backdrop-filter: blur(var(--blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
+  border-bottom: 1px solid var(--chrome-edge);
   position: sticky; top: 0; z-index: 20;
 }
 .brand { font-weight: 600; letter-spacing: .2px; white-space: nowrap; }
@@ -152,7 +176,6 @@ p { margin: 0.5em 0; }
   border-radius: var(--radius);
   padding: 7px; min-height: 140px;
 }
-.column.drop-target { border-color: var(--accent-dim); background: #101722; }
 .column-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 4px 8px 9px; color: var(--fg-muted);
@@ -168,7 +191,25 @@ p { margin: 0.5em 0; }
   cursor: pointer; transition: border-color .12s, transform .06s;
 }
 .card:hover { border-color: var(--line); background: var(--bg-hover); }
-.card:active { transform: scale(.995); }
+.card:active { transform: scale(.985); }
+.card { touch-action: manipulation; }
+/* The card under the finger. It leaves the flow, follows the pointer 1:1, and
+ * is rendered above everything else so it reads as picked up. */
+.card.lifted {
+  position: fixed; z-index: 70; margin: 0; pointer-events: none;
+  cursor: grabbing;
+  background: var(--bg-hover);
+  border-color: var(--accent-dim);
+  box-shadow: 0 18px 44px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.4);
+  transition: none; /* the JS spring owns transform; CSS must not fight it */
+}
+/* The gap the card came from, so the column does not reflow mid-drag. */
+.card-placeholder {
+  border: 1px dashed var(--line); border-radius: var(--radius-sm);
+  background: transparent; margin-bottom: 7px; opacity: .5;
+}
+.column.drop-target { border-color: var(--accent-dim); background: #101722; }
+.column.drop-target .column-head { color: var(--accent); }
 .card.dragging { opacity: .4; }
 .card.unread { border-left: 2px solid var(--accent); }
 .card-top { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
@@ -214,6 +255,9 @@ p { margin: 0.5em 0; }
   white-space: nowrap;
 }
 .btn:hover { color: var(--fg); border-color: var(--fg-faint); }
+/* Feedback belongs on the press. Waiting for :active-on-release, or worse for
+ * the click handler, reads as a dead control. */
+.btn:active { transform: scale(.96); transition: transform var(--press) var(--ease-out); }
 .btn.primary { background: var(--accent-dim); border-color: var(--accent); color: #dce9ff; }
 .btn.primary:hover { background: #325c94; color: #fff; }
 .btn.danger:hover { color: var(--danger); border-color: var(--danger); }
@@ -367,18 +411,31 @@ p { margin: 0.5em 0; }
 }
 
 /* popover + toast */
+/* A popover must come from the thing that opened it: setting transform-origin
+ * at the trigger keeps the spatial relationship legible. */
 .pop {
   position: fixed; z-index: 60; min-width: 260px;
-  background: var(--bg-raised); border: 1px solid var(--line);
+  background: var(--chrome); border: 1px solid var(--line);
+  backdrop-filter: blur(var(--blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
   border-radius: var(--radius); padding: 13px;
   box-shadow: 0 14px 40px rgba(0,0,0,.5);
+  /* Materialise rather than fade: blur and scale animate together so the
+   * surface reads as arriving, not as an opacity ramp. */
+  transition: opacity 160ms var(--ease-out), transform 160ms var(--ease-out);
 }
 .toast {
-  position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+  position: fixed; bottom: 22px; left: 50%;
   z-index: 80; padding: 9px 17px;
-  background: var(--bg-hover); border: 1px solid var(--line);
+  background: var(--chrome); border: 1px solid var(--line);
+  backdrop-filter: blur(var(--blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(180%);
   border-radius: 20px; font-size: 12.5px;
   box-shadow: 0 8px 30px rgba(0,0,0,.5);
+  /* Two independent axes: the spring owns Y, translateX(-50%) stays in CSS so
+   * the two never fight over the same transform. */
+  margin-left: -50%;
+  transform: translateX(50%);
 }
 .toast.err { border-color: var(--danger); color: #ffd4d8; }
 
@@ -391,3 +448,81 @@ p { margin: 0.5em 0; }
   background: rgba(0,0,0,.85); cursor: zoom-out;
 }
 .lightbox img { max-width: 92vw; max-height: 92vh; }
+
+
+/* ------------------------------------------------------------------ motion */
+
+/* A view swap is a cross-fade, not a slide: navigating between the board and a
+ * task is a change of context, and sliding would imply a spatial relationship
+ * that does not exist (see §7 — symmetric paths only where the space is real). */
+.view { animation: viewIn 180ms var(--ease-out) both; }
+@keyframes viewIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* Cards settle in behind the previous view rather than popping. Short, and
+ * capped so a long column does not turn into a cascade. */
+.card { animation: cardIn 220ms var(--ease-out) both; }
+.board.no-enter .card { animation: none; }
+@keyframes cardIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.column:nth-child(2) .card { animation-delay: 12ms; }
+.column:nth-child(3) .card { animation-delay: 24ms; }
+.column:nth-child(4) .card { animation-delay: 36ms; }
+.column:nth-child(5) .card { animation-delay: 48ms; }
+.column:nth-child(6) .card { animation-delay: 60ms; }
+
+/* Scroll edge instead of a hard divider: the fade only appears where floating
+ * chrome actually overlaps content. */
+.topbar::after {
+  content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 14px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(0,0,0,.28), transparent);
+  opacity: 0; transition: opacity 200ms var(--ease-out);
+}
+body.scrolled .topbar::after { opacity: 1; }
+
+/* The board scrolls horizontally; give it a little resistance-free hysteresis
+ * rather than a snap, and keep the scrollbar out of the way. */
+.board { scrollbar-width: thin; overscroll-behavior-x: contain; }
+.board::-webkit-scrollbar { height: 8px; }
+.board::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+
+.nav a, .btn, .chip, .identity-chip, .inbox-item, .sides-table tr {
+  transition: background-color 140ms var(--ease-out), color 140ms var(--ease-out),
+              border-color 140ms var(--ease-out), transform var(--press) var(--ease-out);
+}
+.inbox-item:active { background: var(--bg-hover); }
+
+/* Focus is a first-class state, not the browser's default ring. */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.btn:focus-visible, .chip:focus-visible { outline-offset: 1px; }
+
+/* ------------------------------------------------------- accessibility */
+
+/* Reduced motion asks for a gentler equivalent, not for no feedback: keep the
+ * opacity changes that carry meaning, drop everything vestibular. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+  .card:active, .btn:active { transform: none; }
+  .card { animation: none; }
+  .view { animation: none; }
+}
+
+/* Frostier, not transparent: legibility over a blurred surface depends on the
+ * surface carrying enough of the background. */
+@media (prefers-reduced-transparency: reduce) {
+  .topbar, .pop, .toast {
+    background: var(--bg-raised);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root { --line: #3a4351; --line-soft: #2c3440; --fg-muted: #a8b2c1; }
+  .topbar, .pop, .toast { background: var(--bg); backdrop-filter: none; border-color: var(--line); }
+  .card, .seg, .panel { border-color: var(--line); }
+}
