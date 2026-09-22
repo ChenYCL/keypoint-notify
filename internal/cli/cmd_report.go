@@ -134,8 +134,34 @@ func (a *app) report(args []string) int {
 	return ExitOK
 }
 
+// maxUpload is the client-side mirror of the server's limit. Checking locally
+// turns "wait for 33 MB to upload, then get rejected" into an immediate error.
+const maxUpload = 32 << 20
+
+// checkUploadSizes rejects oversized files before the bytes are read.
+//
+// Without it, a too-large attachment costs a full round trip and comes back as
+// a server-side parse error, which reads like a syntax mistake rather than a
+// size one.
+func checkUploadSizes(paths []string) error {
+	for _, p := range paths {
+		info, err := os.Stat(p)
+		if err != nil {
+			return fmt.Errorf("附件 %s 读不到：%w", p, err)
+		}
+		if info.Size() > maxUpload {
+			return fmt.Errorf("附件 %s 有 %.1f MB，超过 %d MB 上限；更大的内容改用链接（任务 links 字段，或分段正文里的 URL）",
+				p, float64(info.Size())/(1<<20), maxUpload>>20)
+		}
+	}
+	return nil
+}
+
 // uploadFiles streams the given paths to the server and returns their ids.
 func (a *app) uploadFiles(paths []string, taskCode, sideKey string) ([]string, error) {
+	if err := checkUploadSizes(paths); err != nil {
+		return nil, err
+	}
 	extra := map[string]string{}
 	if sideKey != "" {
 		extra["side_key"] = sideKey
@@ -190,6 +216,10 @@ func (a *app) attach(args []string) int {
 	if len(files) == 0 {
 		fs.Usage()
 		return ExitUsage
+	}
+	if err := checkUploadSizes(files); err != nil {
+		fmt.Fprintln(os.Stderr, "✗", err)
+		return ExitError
 	}
 	extra := map[string]string{}
 	if *side != "" {

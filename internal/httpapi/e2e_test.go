@@ -760,3 +760,100 @@ func TestCompletingTaskClosesOpenSides(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Upload size limits
+// ---------------------------------------------------------------------------
+
+// An oversized upload must come back as a size error, not a parse error:
+// "malformed multipart" sends the caller off to fix a request that was fine.
+func TestOversizedUploadReportsSizeNotSyntax(t *testing.T) {
+	h := newHarness(t)
+	code := h.newTask("大附件", nil)
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	// One byte over the store's limit. Written through a pipe-free writer so
+	// the test does not allocate twice.
+	part, err := w.CreateFormFile("file", "huge.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(make([]byte, store.MaxBlobBytes+1)); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+
+	req, _ := http.NewRequest("POST", h.srv.URL+"/api/v1/tasks/"+code+"/files", &buf)
+	req.Header.Set("Authorization", "Bearer "+h.key)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("want 413, got %d\n%s", resp.StatusCode, body)
+	}
+	var e map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&e); err != nil {
+		t.Fatal(err)
+	}
+	if e["error"] != "file_too_large" {
+		t.Errorf("want error file_too_large, got %v", e["error"])
+	}
+	// The hint must name the alternative, since a big file is usually better
+	// as a link than as an attachment.
+	if hint, _ := e["hint"].(string); !strings.Contains(hint, "链接") {
+		t.Errorf("the hint should point at links as the alternative, got %q", hint)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Event cursor semantics
+// ---------------------------------------------------------------------------
+
+// The two ways of asking for events must stay distinct: omitting `since` syncs
+// a fresh client to now, while an explicit `since=0` replays from the start.
+func TestEventCursorSyncsOrReplays(t *testing.T) {
+	h := newHarness(t)
+	h.newTask("先有的任务", nil)
+
+	var synced struct {
+		Count  int    `json:"count"`
+		Cursor int64  `json:"cursor"`
+		Note   string `json:"note"`
+	}
+	h.do("GET", "/api/v1/events", nil, &synced, http.StatusOK)
+	if synced.Count != 0 {
+		t.Errorf("omitting since should sync, not replay: got %d events", synced.Count)
+	}
+	if synced.Cursor == 0 {
+		t.Error("syncing should still hand back a usable cursor")
+	}
+
+	var replayed struct {
+		Count  int `json:"count"`
+		Events []struct {
+			Type string `json:"type"`
+		} `json:"events"`
+	}
+	h.do("GET", "/api/v1/events?since=0", nil, &replayed, http.StatusOK)
+	if replayed.Count == 0 {
+		t.Error("an explicit since=0 should replay history")
+	}
+	if len(replayed.Events) > 0 && replayed.Events[0].Type != store.EvTaskCreated {
+		t.Errorf("a replay should start at the first event, got %q", replayed.Events[0].Type)
+	}
+
+	// backlog=1 is the explicit "give me history" spelling.
+	var backlog struct {
+		Count int `json:"count"`
+	}
+	h.do("GET", "/api/v1/events?backlog=1", nil, &backlog, http.StatusOK)
+	if backlog.Count == 0 {
+		t.Error("backlog=1 should return history")
+	}
+}

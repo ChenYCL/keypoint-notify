@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,9 +11,18 @@ import (
 	"github.com/light/keypoint-notify/internal/store"
 )
 
-// uploadCeiling is the hard read cap. store.SaveFile enforces the real limit
-// and returns ErrTooLarge, which respondError maps to a 413 with guidance.
-const uploadCeiling = 33 << 20
+// humanBytes renders a size the way an error message wants it.
+func humanBytes(n int64) string {
+	if n >= 1<<20 {
+		return fmt.Sprintf("%d MB", n>>20)
+	}
+	return fmt.Sprintf("%d KB", n>>10)
+}
+
+// uploadCeiling is the hard read cap, one megabyte above the real limit so a
+// slightly-oversized file reaches SaveFile and gets the precise error rather
+// than being cut off mid-stream by the reader.
+const uploadCeiling = store.MaxBlobBytes + (1 << 20)
 
 // ---------------------------------------------------------------------------
 // POST /api/v1/files                 standalone upload, reference the id later
@@ -43,6 +53,16 @@ func (s *Server) handleFileUploadToTask(w http.ResponseWriter, r *http.Request) 
 func (s *Server) upload(w http.ResponseWriter, r *http.Request, taskID string) {
 	r.Body = http.MaxBytesReader(w, r.Body, uploadCeiling)
 	if err := r.ParseMultipartForm(uploadCeiling); err != nil {
+		// A body that blew the reader cap is a size problem, not a syntax
+		// problem: saying "malformed multipart" here sends the caller off to
+		// fix a request that was fine.
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			respondError(w, NewError(http.StatusRequestEntityTooLarge, "file_too_large",
+				"附件超过 %s 上限", humanBytes(store.MaxBlobBytes)).
+				WithHint("更大的内容改用链接：任务的 links 字段，或分段正文里的 URL"))
+			return
+		}
 		respondError(w, NewError(http.StatusBadRequest, "bad_multipart",
 			"解析上传失败: %v", err).
 			WithHint(`用 multipart/form-data，字段名 file。示例：curl -H "Authorization: Bearer $KP_KEY" -F file=@shot.png http://<host>/api/v1/files`))

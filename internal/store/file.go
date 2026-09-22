@@ -14,11 +14,11 @@ import (
 	"github.com/light/keypoint-notify/internal/model"
 )
 
-// maxBlobBytes caps a single upload. Attachments are meant to be screenshots,
+// MaxBlobBytes caps a single upload. Attachments are meant to be screenshots,
 // logs and diagrams, not build artifacts; anything bigger belongs in a link.
-const maxBlobBytes = 32 << 20 // 32 MiB
+const MaxBlobBytes = 32 << 20 // 32 MiB
 
-// ErrTooLarge is returned when an upload exceeds maxBlobBytes.
+// ErrTooLarge is returned when an upload exceeds MaxBlobBytes.
 var ErrTooLarge = errors.New("file too large")
 
 // SaveFile streams r into blob storage and records it. Identical content is
@@ -33,15 +33,15 @@ func (s *Store) SaveFile(name, mime, uploader, taskID, sideID, scope, refID stri
 	defer os.Remove(tmpPath) // no-op once renamed into place
 
 	hasher := sha256.New()
-	size, err := io.Copy(io.MultiWriter(tmp, hasher), io.LimitReader(r, maxBlobBytes+1))
+	size, err := io.Copy(io.MultiWriter(tmp, hasher), io.LimitReader(r, MaxBlobBytes+1))
 	if cerr := tmp.Close(); cerr != nil && err == nil {
 		err = cerr
 	}
 	if err != nil {
 		return model.Attachment{}, err
 	}
-	if size > maxBlobBytes {
-		return model.Attachment{}, fmt.Errorf("%w: %d bytes exceeds the %d byte limit", ErrTooLarge, size, maxBlobBytes)
+	if size > MaxBlobBytes {
+		return model.Attachment{}, fmt.Errorf("%w: %d bytes exceeds the %d byte limit", ErrTooLarge, size, MaxBlobBytes)
 	}
 
 	sum := hex.EncodeToString(hasher.Sum(nil))

@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          # Read the floor from go.mod so the workflow cannot drift from the
+          # module's own requirement.
+          go-version-file: go.mod
+          cache: true
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "these files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - run: go vet ./...
+      - run: go test ./... -count=1 -race
+      - name: build (CGO off = true single binary)
+        run: CGO_ENABLED=0 go build -trimpath -o /tmp/kp ./cmd/keypoint
+      - name: smoke test the binary
+        run: |
+          /tmp/kp version
+          /tmp/kp serve --data "$RUNNER_TEMP/kpdata" --addr 127.0.0.1:8877 --quiet &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8877/api/v1/health && break
+            sleep 0.3
+          done
+          curl -sf http://127.0.0.1:8877/api/v1/health | grep -q '"status":"ok"'
+          # The API manual must be readable without credentials.
+          curl -sf http://127.0.0.1:8877/api/v1/llms.txt | grep -q 'pack'
+          curl -sf -o /dev/null http://127.0.0.1:8877/

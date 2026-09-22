@@ -8,8 +8,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -77,7 +79,13 @@ func cmdServe(args []string) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "✗ 监听 %s 失败: %v\n", *addr, err)
 		if strings.Contains(err.Error(), "address already in use") {
-			fmt.Fprintln(os.Stderr, "  → 已经有一个 kp serve 在跑？用 `lsof -i :8787` 看看，或换 --addr")
+			// Naming the holder turns a dead end into a decision: the user can
+			// see whether it is a stale kp or an unrelated service.
+			if holder := portHolder(*addr); holder != "" {
+				fmt.Fprintf(os.Stderr, "  → 端口被占：%s\n", holder)
+			}
+			fmt.Fprintf(os.Stderr, "  → 换一个端口重试：kp serve --addr 127.0.0.1:%d\n", suggestPort(*addr))
+			fmt.Fprintln(os.Stderr, "  → 或者先停掉已有的 kp：pkill -f 'kp serve'")
 		}
 		return ExitError
 	}
@@ -119,6 +127,54 @@ func cmdServe(args []string) int {
 		_ = srv.Shutdown(shutCtx)
 		return ExitOK
 	}
+}
+
+// portHolder shells out to lsof to name whatever is listening on addr. It is
+// best-effort: a missing or slow lsof must never block startup.
+func portHolder(addr string) string {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "lsof", "-nP", "-iTCP:"+port, "-sTCP:LISTEN").Output()
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) < 2 {
+		return ""
+	}
+	fields := strings.Fields(lines[1])
+	if len(fields) < 2 {
+		return ""
+	}
+	return fmt.Sprintf("%s (pid %s)", fields[0], fields[1])
+}
+
+// suggestPort returns a nearby port that is currently free, so the message can
+// print a command that will actually work.
+func suggestPort(addr string) int {
+	_, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return 8877
+	}
+	base, err := strconv.Atoi(portStr)
+	if err != nil {
+		return 8877
+	}
+	for _, candidate := range []int{base + 10, base + 1, base - 1, 8877, 8899, 9000} {
+		if candidate <= 1024 || candidate > 65535 {
+			continue
+		}
+		ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", candidate))
+		if err == nil {
+			ln.Close()
+			return candidate
+		}
+	}
+	return base + 10
 }
 
 // displayAddr turns a wildcard bind into something clickable.

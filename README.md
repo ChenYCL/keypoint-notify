@@ -118,7 +118,7 @@ make install        # → ~/.local/bin/kp
 make skill          # → ~/.claude/skills/keypoint-notify
 ```
 
-需要 Go 1.22+（用了 `net/http` 的方法+路径路由）。
+需要 Go 1.25+（下限由 `modernc.org/sqlite` 决定，不是本项目的代码）。
 
 公网访问推荐 **Cloudflare Tunnel** 而不是开端口，见
 [`docs/deploy-tunnel.md`](docs/deploy-tunnel.md)。
