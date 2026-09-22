@@ -36,7 +36,7 @@ func (a *app) role(args []string) int {
 		fs.SetOutput(os.Stderr)
 		holders := fs.Bool("holders", false, "带上持有者")
 		keys := fs.Bool("keys", false, "只输出 key 列表")
-		if err := fs.Parse(intersperse(fs, rest)); err != nil {
+		if err := a.parseSub(fs, rest); err != nil {
 			return ExitUsage
 		}
 		var raw map[string]any
@@ -80,7 +80,7 @@ func (a *app) role(args []string) int {
 		fs.SetOutput(os.Stderr)
 		name := fs.String("name", "", "显示名")
 		desc := fs.String("desc", "", "说明：这个角色接什么活")
-		if err := fs.Parse(intersperse(fs, rest)); err != nil {
+		if err := a.parseSub(fs, rest); err != nil {
 			return ExitUsage
 		}
 		key := fs.Arg(0)
@@ -202,7 +202,7 @@ func (a *app) identity(args []string) int {
 		kind := fs.String("kind", "agent", "human 或 agent")
 		roles := fs.String("roles", "member", "逗号分隔")
 		active := fs.String("active", "", "激活角色，默认第一个")
-		if err := fs.Parse(intersperse(fs, rest)); err != nil {
+		if err := a.parseSub(fs, rest); err != nil {
 			return ExitUsage
 		}
 		name := fs.Arg(0)
@@ -228,7 +228,7 @@ func (a *app) identity(args []string) int {
 		fs := flag.NewFlagSet("kp identity set-roles", flag.ContinueOnError)
 		fs.SetOutput(os.Stderr)
 		active := fs.String("active", "", "同时改激活角色")
-		if err := fs.Parse(intersperse(fs, rest)); err != nil {
+		if err := a.parseSub(fs, rest); err != nil {
 			return ExitUsage
 		}
 		name := fs.Arg(0)
@@ -464,7 +464,7 @@ func (a *app) hook(args []string) int {
 		secret := fs.String("secret", "", "HMAC 密钥")
 		events := fs.String("events", "", "订阅事件，逗号分隔；留空=全部")
 		disable := fs.Bool("disable", false, "先建但停用")
-		if err := fs.Parse(intersperse(fs, rest)); err != nil {
+		if err := a.parseSub(fs, rest); err != nil {
 			return ExitUsage
 		}
 		url := fs.Arg(0)

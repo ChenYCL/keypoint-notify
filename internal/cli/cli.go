@@ -414,6 +414,49 @@ type: progress | blocker | decision | handoff | result | question
 `)
 }
 
+// parseSub parses a subcommand's own flags *plus* the global ones that make
+// sense to repeat there.
+//
+// Everyone types `kp task list --json`, not `kp --json task list`, and the
+// reference docs recommend the former — so a subcommand flag set that rejects
+// --json is a broken promise. --server and --key are accepted here too, but
+// only when the subcommand does not already define them (kp init does).
+//
+// --role is deliberately NOT bound here: on `kp task list` it already means
+// "filter by this role", which is the more common meaning at that position.
+// Use `kp --role X task list` to act as another role.
+func (a *app) parseSub(fs *flag.FlagSet, args []string) error {
+	var jsonOut *bool
+	var server, key *string
+	if fs.Lookup("json") == nil {
+		jsonOut = fs.Bool("json", false, "输出 JSON（给程序/agent 用）")
+	}
+	if fs.Lookup("v") == nil {
+		fs.Bool("v", false, "打印请求细节")
+	}
+	if fs.Lookup("server") == nil {
+		server = fs.String("server", "", "覆盖服务端地址（也可用 KEYPOINT_SERVER）")
+	}
+	if fs.Lookup("key") == nil {
+		key = fs.String("key", "", "覆盖 API key（也可用 KEYPOINT_API_KEY）")
+	}
+	if err := fs.Parse(intersperse(fs, args)); err != nil {
+		return err
+	}
+	if jsonOut != nil && *jsonOut {
+		a.jsonOut = true
+	}
+	if server != nil && *server != "" {
+		a.cfg.Server = strings.TrimRight(*server, "/")
+		a.cl.BaseURL = a.cfg.Server
+	}
+	if key != nil && *key != "" {
+		a.cfg.APIKey = *key
+		a.cl.APIKey = *key
+	}
+	return nil
+}
+
 // intersperse reorders arguments so flags may appear after positional ones.
 //
 // The stdlib flag package stops parsing at the first non-flag token, which

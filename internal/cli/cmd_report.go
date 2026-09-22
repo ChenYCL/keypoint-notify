@@ -37,7 +37,7 @@ func (a *app) report(args []string) int {
 		printReportHelp()
 		return ExitOK
 	}
-	if err := fs.Parse(intersperse(fs, args)); err != nil {
+	if err := a.parseSub(fs, args); err != nil {
 		return ExitUsage
 	}
 	code := fs.Arg(0)
@@ -209,7 +209,7 @@ func (a *app) attach(args []string) int {
 返回的 markdown 片段可以直接贴进分段正文或上报里。
 `)
 	}
-	if err := fs.Parse(intersperse(fs, args)); err != nil {
+	if err := a.parseSub(fs, args); err != nil {
 		return ExitUsage
 	}
 	files := fs.Args()
@@ -272,7 +272,7 @@ func (a *app) inbox(args []string) int {
 被 @ 的时候、你负责的任务有变化的时候，会出现在这里。
 `)
 	}
-	if err := fs.Parse(intersperse(fs, args)); err != nil {
+	if err := a.parseSub(fs, args); err != nil {
 		return ExitUsage
 	}
 	if *readAll || *read != "" {
@@ -345,7 +345,7 @@ func (a *app) events(args []string) int {
 响应里的 cursor 下次原样传回 --since 即可。事件也是 webhook 的同一份数据。
 `)
 	}
-	if err := fs.Parse(intersperse(fs, args)); err != nil {
+	if err := a.parseSub(fs, args); err != nil {
 		return ExitUsage
 	}
 

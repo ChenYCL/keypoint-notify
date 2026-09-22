@@ -154,7 +154,7 @@ func (a *app) taskList(args []string) int {
 		printTaskHelp()
 		return ExitOK
 	}
-	if err := fs.Parse(intersperse(fs, args)); err != nil {
+	if err := a.parseSub(fs, args); err != nil {
 		return ExitUsage
 	}
 	path := "/api/v1/tasks" + client.Q(
@@ -253,7 +253,7 @@ func (a *app) taskShow(args []string) int {
 	fs.SetOutput(os.Stderr)
 	side := fs.String("side", "", "只聚焦某个工作面")
 	reports := fs.Int("reports", 5, "带上最近 N 条上报")
-	if err := fs.Parse(intersperse(fs, args)); err != nil {
+	if err := a.parseSub(fs, args); err != nil {
 		return ExitUsage
 	}
 	code := fs.Arg(0)
@@ -409,7 +409,7 @@ func (a *app) taskPack(args []string) int {
 以及**交付契约**——告诉承接方做完该怎么上报。
 `)
 	}
-	if err := fs.Parse(intersperse(fs, args)); err != nil {
+	if err := a.parseSub(fs, args); err != nil {
 		return ExitUsage
 	}
 	code := fs.Arg(0)
@@ -477,7 +477,7 @@ func (a *app) taskSegment(args []string) int {
 	fs.SetOutput(os.Stderr)
 	prompt := fs.Bool("prompt", false, "包一层可粘贴的上下文")
 	format := fs.String("format", "", "json 看结构化字段")
-	if err := fs.Parse(intersperse(fs, args)); err != nil {
+	if err := a.parseSub(fs, args); err != nil {
 		return ExitUsage
 	}
 	code, key := fs.Arg(0), fs.Arg(1)
@@ -521,7 +521,7 @@ func (a *app) segmentSet(args []string) int {
 	file := fs.String("file", "", "从文件读正文；连字符 - 表示 stdin")
 	msg := fs.String("m", "", "直接给正文")
 	appendMode := fs.Bool("append", false, "追加到现有正文而不是替换")
-	if err := fs.Parse(intersperse(fs, args)); err != nil {
+	if err := a.parseSub(fs, args); err != nil {
 		return ExitUsage
 	}
 	code, key := fs.Arg(0), fs.Arg(1)
@@ -589,7 +589,7 @@ assign 之后对方用 ` + "`kp task pack KP-12 --side ui`" + ` 就能独立开�
 		fs := flag.NewFlagSet("kp task side ls", flag.ContinueOnError)
 		fs.SetOutput(os.Stderr)
 		assignable := fs.Bool("assignable", false, "只看还没指派的")
-		if err := fs.Parse(intersperse(fs, rest)); err != nil {
+		if err := a.parseSub(fs, rest); err != nil {
 			return ExitUsage
 		}
 		code := fs.Arg(0)
@@ -633,7 +633,7 @@ assign 之后对方用 ` + "`kp task pack KP-12 --side ui`" + ` 就能独立开�
 		deps := fs.String("deps", "", "依赖的 side key，逗号分隔")
 		repo := fs.String("repo", "", "仓库")
 		branch := fs.String("branch", "", "分支")
-		if err := fs.Parse(intersperse(fs, rest)); err != nil {
+		if err := a.parseSub(fs, rest); err != nil {
 			return ExitUsage
 		}
 		code, key := fs.Arg(0), fs.Arg(1)
@@ -672,7 +672,7 @@ assign 之后对方用 ` + "`kp task pack KP-12 --side ui`" + ` 就能独立开�
 		status := fs.String("status", "", "todo/doing/blocked/done")
 		deps := fs.String("deps", "", "覆盖依赖列表，逗号分隔")
 		unassign := fs.Bool("unassign", false, "取消指派")
-		if err := fs.Parse(intersperse(fs, rest)); err != nil {
+		if err := a.parseSub(fs, rest); err != nil {
 			return ExitUsage
 		}
 		code, key := fs.Arg(0), fs.Arg(1)
@@ -776,7 +776,7 @@ func (a *app) taskEdit(args []string) int {
 	priority := fs.String("priority", "", "P0..P3")
 	role := fs.String("role", "", "负责角色")
 	labels := fs.String("label", "", "标签，逗号分隔")
-	if err := fs.Parse(intersperse(fs, args)); err != nil {
+	if err := a.parseSub(fs, args); err != nil {
 		return ExitUsage
 	}
 	code := fs.Arg(0)
@@ -881,7 +881,7 @@ func (a *app) taskNew(args []string) int {
 		fs.Usage()
 		return ExitOK
 	}
-	if err := fs.Parse(intersperse(fs, args)); err != nil {
+	if err := a.parseSub(fs, args); err != nil {
 		return ExitUsage
 	}
 
