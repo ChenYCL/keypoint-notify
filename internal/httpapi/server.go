@@ -54,6 +54,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/tasks/{code}/sides", auth(http.HandlerFunc(s.handleSideCreate)))
 	mux.Handle("PATCH /api/v1/tasks/{code}/sides/{key}", auth(http.HandlerFunc(s.handleSidePatch)))
 	mux.Handle("DELETE /api/v1/tasks/{code}/sides/{key}", auth(http.HandlerFunc(s.handleSideDelete)))
+	mux.Handle("POST /api/v1/tasks/{code}/sides/{key}/claim", auth(http.HandlerFunc(s.handleSideClaim)))
 	mux.Handle("GET /api/v1/tasks/{code}/reports", auth(http.HandlerFunc(s.handleReportList)))
 	mux.Handle("POST /api/v1/tasks/{code}/reports", auth(http.HandlerFunc(s.handleReportCreate)))
 	mux.Handle("GET /api/v1/tasks/{code}/events", auth(http.HandlerFunc(s.handleEventList)))
@@ -64,6 +65,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/events", auth(http.HandlerFunc(s.handleEventList)))
 	mux.Handle("GET /api/v1/stream", auth(http.HandlerFunc(s.handleStream)))
 	mux.Handle("GET /api/v1/me/board", auth(http.HandlerFunc(s.handleMyBoard)))
+	mux.Handle("GET /api/v1/me/next", auth(http.HandlerFunc(s.handleNext)))
 
 	mux.Handle("POST /api/v1/files", auth(http.HandlerFunc(s.handleFileUpload)))
 	mux.Handle("GET /api/v1/files/{id}", auth(http.HandlerFunc(s.handleFileGet)))

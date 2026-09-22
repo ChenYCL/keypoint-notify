@@ -52,7 +52,30 @@ GET /api/v1/tasks/{code}/pack?side=ui&format=md&max_chars=12000&reports=5
 | `format` | `md` | `md` 给模型看；`json` 给程序用 |
 | `empty` | — | `1` 时带上还没写内容的固定分段 |
 
-### 2. 上报
+### 2. 等活（协作循环）
+
+```http
+GET /api/v1/me/next?wait=30&claim=1&task=KP-12&side=ui
+```
+
+一条调用回答：有没有属于我的活 / 为什么是我 / 完整开工包。
+
+| 参数 | 说明 |
+|---|---|
+| `wait` | 没活时服务端挂起秒数（长轮询，上限 60） |
+| `claim=1` | 拿到属于我的工作面就原子认领 |
+| `since` | 显式游标；**省略则用该身份上次存下的** |
+| `task` / `side` | 收窄 |
+| `format` | `md`（默认）/ `json` |
+
+`reason`：`mention`｜`unblocked`｜`assigned`｜`owned`。
+只认领属于调用者的工作面 —— 被 mention 不等于接管别人的面。
+
+```http
+POST /api/v1/tasks/{code}/sides/{key}/claim   原子认领，同角色只有一个成功
+```
+
+### 3. 上报
 
 ```http
 POST /api/v1/tasks/{code}/reports
@@ -69,7 +92,7 @@ Content-Type: application/json
 }
 ```
 
-### 3. 查询
+### 4. 查询
 
 ```http
 GET /api/v1/tasks?assigned=me

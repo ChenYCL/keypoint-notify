@@ -79,16 +79,25 @@ func (h *harness) doAs(key, method, path string, body any, out any, wantStatus i
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != wantStatus {
-		h.t.Fatalf("%s %s: want %d, got %d\n%s", method, path, wantStatus, resp.StatusCode, data)
+		h.t.Fatalf("%s %s: want %d, got %d\n%s", method, path, wantStatus, resp.StatusCode, clip(data))
 	}
 	if out != nil {
 		if err := json.Unmarshal(data, out); err != nil {
-			h.t.Fatalf("%s %s: decode %q: %v", method, path, data, err)
+			h.t.Fatalf("%s %s: decode: %v\n%s", method, path, err, clip(data))
 		}
 	}
 }
 
 // text fetches a plain-text endpoint.
+// clip keeps a failure message from dumping an entire rendered pack.
+func clip(b []byte) string {
+	const max = 400
+	if len(b) <= max {
+		return string(b)
+	}
+	return string(b[:max]) + fmt.Sprintf("\n…（共 %d 字节，已截断）", len(b))
+}
+
 func (h *harness) text(path string, wantStatus int) string {
 	h.t.Helper()
 	req, _ := http.NewRequest("GET", h.srv.URL+path, nil)

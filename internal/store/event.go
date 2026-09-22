@@ -22,6 +22,7 @@ const (
 	EvSideCreated    = "side.created"
 	EvSideUpdated    = "side.updated"
 	EvSideAssigned   = "side.assigned"
+	EvSideUnblocked  = "side.unblocked"
 	EvSideDeleted    = "side.deleted"
 	EvReportCreated  = "report.created"
 	EvFileUploaded   = "file.uploaded"
@@ -32,7 +33,7 @@ const (
 var AllEventTypes = []string{
 	EvTaskCreated, EvTaskUpdated, EvTaskStatus, EvTaskDeleted,
 	EvSegmentSet, EvSegmentDeleted,
-	EvSideCreated, EvSideUpdated, EvSideAssigned, EvSideDeleted,
+	EvSideCreated, EvSideUpdated, EvSideAssigned, EvSideUnblocked, EvSideDeleted,
 	EvReportCreated, EvFileUploaded, EvIdentityUpdate,
 }
 
@@ -54,6 +55,25 @@ type EmitInput struct {
 
 // Emit writes an event and fans it out to the inboxes that should see it.
 func (s *Store) Emit(in EmitInput) (model.Event, error) {
+	var out model.Event
+	err := s.tx(func(tx *sql.Tx) error {
+		ev, err := emitTx(tx, in)
+		if err != nil {
+			return err
+		}
+		out = ev
+		return nil
+	})
+	if err != nil {
+		return model.Event{}, err
+	}
+	return out, nil
+}
+
+// emitTx is Emit for callers already holding a transaction. A write that both
+// changes state and announces it must do so atomically, or a crash between the
+// two leaves a task done with nobody told.
+func emitTx(tx *sql.Tx, in EmitInput) (model.Event, error) {
 	if in.Type == "" {
 		return model.Event{}, errors.New("event type is required")
 	}
@@ -70,15 +90,12 @@ func (s *Store) Emit(in EmitInput) (model.Event, error) {
 	}
 	ev.SideID = in.SideID
 
-	err := s.tx(func(tx *sql.Tx) error {
-		id, err := appendEventTx(tx, ev)
-		if err != nil {
-			return err
-		}
-		ev.ID = id
-		return s.fanoutTx(tx, ev, in)
-	})
+	id, err := appendEventTx(tx, ev)
 	if err != nil {
+		return model.Event{}, err
+	}
+	ev.ID = id
+	if err := fanoutTx(tx, ev, in); err != nil {
 		return model.Event{}, err
 	}
 	return ev, nil
@@ -99,7 +116,7 @@ func appendEventTx(tx *sql.Tx, ev model.Event) (int64, error) {
 // fanoutTx turns an event into notification rows for every identity that
 // should see it: explicit targets, watchers, the task owner, and whoever owns
 // the side the event happened on. The actor never notifies themselves.
-func (s *Store) fanoutTx(tx *sql.Tx, ev model.Event, in EmitInput) error {
+func fanoutTx(tx *sql.Tx, ev model.Event, in EmitInput) error {
 	targets := map[string]bool{}
 
 	resolve := func(nameOrRole string) error {

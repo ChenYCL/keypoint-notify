@@ -162,7 +162,43 @@ docs:     本文档是机器可读的权威说明；/api/v1/schema 是同一份�
   Identity 身份，一个 API key 对应一个身份；身份持有若干 role，可改绑、可轮换 key
   Event    事件，一切变更都产生事件；驱动收件箱、webhook、SSE
 
-## 最重要的一条：先拿 pack
+## 最重要的一条（协作循环）：先问 me/next
+
+一个会话在循环里干活时，不要自己拼「拉事件 → 判断是不是我的 → 取任务 → 取 pack」。
+一条调用就够了：
+
+  GET /api/v1/me/next?wait=30&claim=1&task=KP-12&side=ui&max_chars=12000
+
+它回答三件事：**有没有属于我的活 / 为什么是我 / 开工需要的全部上下文**。
+
+参数：
+  wait=<秒>     没有活时在服务端挂起多久（长轮询，上限 60）。0 = 立刻返回
+  claim=1       拿到属于我的工作面就原子认领 —— 同角色的多个会话只有一个能抢到
+  since=<游标>  显式指定从哪之后看。**省略时用你上次调用存下的游标**，
+                所以循环里不需要自己带着游标跑；不带 since 也不会反复收到同一条提及
+  task= side=   收窄范围
+  max_chars=    pack 体积上限
+  format=md|json
+
+reason 的取值决定了你该怎么做：
+
+  mention    有人在某个上报里 @ 了我，在等我回应。**不是让我接手他的工作面**
+  unblocked  我的工作面依赖刚完成，解封了
+  assigned   指派给我角色的工作面，依赖就绪且还没人认领
+  owned      我是任务负责人，任务有新动静
+
+响应是 markdown（默认）或 JSON，开头有一段「为什么是你」，然后是完整开工包
+（含交付契约）。JSON 形状：{work:{reason,explanation,task,side,dependents}, cursor, claimed, pack}
+
+**协作的闭环**：交棒不需要谁去通知谁 —— 把一个 side 置为 done，系统会自己
+找到依赖它的下游 side，解封并产生 side.unblocked 事件，下游会话的长轮询
+立刻被唤醒。下游看到的是「为什么被叫醒」+ 完整上下文，不是一条干巴巴的通知。
+
+单个工作面也可以直接认领：
+
+  POST /api/v1/tasks/{code}/sides/{key}/claim
+
+## 另一条路：自己拿 pack
 
 要做任何一个任务，第一步永远是：
 
@@ -199,6 +235,7 @@ prompt 上下文交给模型即可开工。
 
 读（全部支持 JSON，默认过滤为空即列出）：
   GET  /api/v1/whoami                          我是谁、我有什么角色、有多少未读
+  GET  /api/v1/me/next?wait=30&claim=1          ★ 轮到我干的活（长轮询 + 完整上下文）
   GET  /api/v1/me/board                        我手上的工作面+我负责的任务
   GET  /api/v1/inbox?unread=1                  我的未读上报
   GET  /api/v1/tasks?assigned=me               指派给我的
@@ -360,6 +397,8 @@ func (s *Server) handleSchema(w http.ResponseWriter, r *http.Request) {
 		"endpoints": []map[string]any{
 			{"method": "GET", "path": "/api/v1/whoami", "desc": "身份、角色、未读数、入口提示"},
 			{"method": "GET", "path": "/api/v1/me/board", "desc": "我手上的工作面 / 我负责的任务"},
+			{"method": "GET", "path": "/api/v1/me/next", "params": []string{"wait", "claim=1", "since", "task", "side", "max_chars", "format=md|json"}, "desc": "★ 轮到我干的活：为什么是我 + 完整开工包（长轮询）"},
+			{"method": "POST", "path": "/api/v1/tasks/{code}/sides/{key}/claim", "desc": "原子认领一个工作面，同角色会话只有一个成功"},
 			{"method": "GET", "path": "/api/v1/inbox", "params": []string{"unread=1", "limit"}, "desc": "我的收件箱"},
 			{"method": "POST", "path": "/api/v1/inbox/read", "desc": "标记已读，空 ids = 全部"},
 			{"method": "GET", "path": "/api/v1/tasks", "params": []string{"assigned=me", "role", "status", "kind", "priority", "label", "q", "since", "updated_since", "view=lite", "group=status", "limit", "offset", "archived"}, "desc": "任务查询"},
@@ -394,8 +433,11 @@ func (s *Server) handleSchema(w http.ResponseWriter, r *http.Request) {
 			{"method": "DELETE", "path": "/api/v1/webhooks/{id}", "desc": "删 webhook"},
 		},
 		"agent_loop": []string{
-			"GET /whoami", "GET /me/board", "GET /tasks/{code}/pack?side=X",
-			"（干活）", "POST /tasks/{code}/reports", "GET /events?since=<cursor>",
+			"GET /whoami",
+			"GET /me/next?wait=30&claim=1   ← 阻塞等活；回来了就是轮到你了",
+			"（干活，上下文在响应里）",
+			"POST /tasks/{code}/reports     ← 完成后上报；置 side 为 done 会自动唤醒下游",
+			"回到第二步",
 		},
 		"gotchas": []string{
 			"重试上报会写两条：不确定时先 GET reports?limit=1 核对",

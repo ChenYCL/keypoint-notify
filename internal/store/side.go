@@ -177,6 +177,7 @@ func (s *Store) UpdateSide(taskID, keyOrID string, in UpdateSideInput, actor str
 	if err != nil {
 		return model.Side{}, err
 	}
+	statusBefore := cur.Status
 	if in.Title != nil && strings.TrimSpace(*in.Title) != "" {
 		cur.Title = strings.TrimSpace(*in.Title)
 	}
@@ -225,6 +226,8 @@ func (s *Store) UpdateSide(taskID, keyOrID string, in UpdateSideInput, actor str
 		cur.Branch = *in.Branch
 	}
 
+	justFinished := cur.Status == model.SideDone && statusBefore != model.SideDone
+
 	err = s.tx(func(tx *sql.Tx) error {
 		now := nowMS()
 		if _, err := tx.Exec(
@@ -234,7 +237,54 @@ func (s *Store) UpdateSide(taskID, keyOrID string, in UpdateSideInput, actor str
 			cur.Repo, cur.Branch, now, cur.ID); err != nil {
 			return err
 		}
-		return touchTask(tx, taskID, now)
+		if err := touchTask(tx, taskID, now); err != nil {
+			return err
+		}
+		if !justFinished {
+			return nil
+		}
+		// Finishing a work face is what unblocks the ones waiting on it. Doing
+		// this here — in the same commit, right after the status write — is what
+		// lets a downstream session be woken instead of having to poll for the
+		// fact that its dependency landed.
+		released, err := releaseDependentsTx(tx, taskID, cur.Key, now)
+		if err != nil {
+			return err
+		}
+		if len(released) == 0 {
+			return nil
+		}
+		emitter := model.Identity{Name: actor}
+		if idn, err := identityByNameTx(tx, actor); err == nil {
+			emitter = idn
+		}
+		task, err := taskTx(tx, taskID)
+		if err != nil {
+			return err
+		}
+		for _, sd := range released {
+			who := "@" + sd.AssigneeRole
+			if sd.AssigneeIdentity != "" {
+				who = sd.AssigneeIdentity
+			}
+			if sd.AssigneeRole == "" && sd.AssigneeIdentity == "" {
+				who = "还没有人认领"
+			}
+			if _, err := emitTx(tx, EmitInput{
+				Type: EvSideUnblocked, Actor: emitter, Task: &task, SideID: sd.ID,
+				Kind: "unblocked",
+				Title: fmt.Sprintf("%s · %s 依赖已完成（%s），可以开工了",
+					task.Code, sd.Key, cur.Key),
+				Notify: []string{sd.AssigneeRole},
+				Payload: map[string]any{
+					"side": sd.Key, "unblocked_by": cur.Key,
+					"assignee_role": sd.AssigneeRole, "assignee": who,
+				},
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return model.Side{}, err

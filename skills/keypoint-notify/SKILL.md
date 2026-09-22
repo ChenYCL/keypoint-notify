@@ -210,12 +210,89 @@ kp attach shot.png --task KP-12         # 直接挂任务上
 
 ---
 
-## 场景三：接活 / 拿上下文开工
+## 场景三：接活 —— 协作循环（最重要的一条）
+
+**当你是"被派活的一方"，不要自己拼「拉事件 → 判断是不是我的 → 取任务 → 取 pack」。
+一条命令就够：**
+
+```bash
+kp next --wait 30 --claim
+```
+
+它回答三件事：**有没有属于我的活 / 为什么是我 / 开工需要的全部上下文**。
+
+| 参数 | 作用 |
+|---|---|
+| `--wait 30` | 没有活时在服务端挂起最多 30 秒（长轮询）。**用它，不要 `sleep 5` 循环轮询** |
+| `--claim` | 拿到属于我的工作面就原子认领；同角色的多个会话只有一个能抢到 |
+| `--task KP-12 --side ui` | 收窄到某个任务/工作面 |
+| `--json` | 结构化：`{work:{reason,explanation,task,side,dependents}, cursor, claimed, pack}` |
+| `--cursor-only` | 只输出游标（脚本里取用） |
+
+返回的第一段就是「为什么是你」，`reason` 决定你怎么做：
+
+| reason | 含义 | 你该做什么 |
+|---|---|---|
+| `mention` | 有人在某个上报里 @ 了我 | **回应**。这不是让你接手他的工作面 |
+| `unblocked` | 我的工作面依赖刚完成，解封了 | 接手，开工 |
+| `assigned` | 指派给我角色的工作面，还没人认领 | 接手，开工 |
+| `owned` | 我是任务负责人，任务有新动静 | 看一眼，决定要不要派人 |
+
+后面直接跟完整开工包（含交付契约），不用再单独取。
+
+**游标不用自己管。** 省略 `--since` 时服务端用你上次调用存下的游标，
+所以循环不会反复收到同一条提及；要回放才显式传 `--since`。
+
+### 三个会话接力的完整样子
+
+```bash
+# ── 会话 A（角色 backend）──
+kp next --wait 30 --claim          # 醒来：KP-3 的 api 工作面派给我了
+# ……改代码……
+kp report KP-3 --side api --type result -m "冷却接口上线，返回服务端权威 remaining_ms"
+kp task side assign KP-3 api --status done
+# ↑ 这一句就是交棒。不用通知谁 —— 系统会自己唤醒等它的人
+
+# ── 会话 B（角色 frontend，此刻正阻塞在 kp next --wait）──
+kp next --wait 30 --claim          # 被 api 的完成叫醒：reason=unblocked
+# ……改代码……
+kp report KP-3 --side ui --type result -m "改用 pagehide 重置倒计时"
+kp task side assign KP-3 ui --status done
+
+# ── 会话 C（角色 review）──
+kp next --wait 30 --claim          # 接力，不会被跳过
+kp report KP-3 --side review --type result -m "边界条件与回归覆盖通过"
+kp task side assign KP-3 review --status done
+kp task status KP-3 done
+```
+
+**为什么这条链能自走**：把一个 side 置成 `done`，服务端会在同一个事务里
+找出依赖它的下游 side，解封并发出 `side.unblocked` —— 下游会话的长轮询
+立刻被唤醒。交棒是副作用，不是额外步骤。
+
+想看着它跑（人肉观察 / 调试）：
+
+```bash
+kp loop                            # 一直等活，拿到就把包打出来
+kp loop --max 3                    # 处理三条退出
+kp loop --run 'claude -p "$KP_PACK"'   # 把包喂给另一个会话
+```
+
+### 不用循环时，直接拿上下文
 
 ```bash
 kp board                          # 我手上有什么（工作面 + 我负责的任务 + 未读）
-kp task pack KP-12 --side ui      # ★ 拿开工包
+kp task pack KP-12 --side ui      # 指定任务/工作面的开工包
 ```
+
+### 抢同一个工作面时
+
+```bash
+kp claim KP-12 ui                 # 原子认领；已被别人拿走会返回非零退出码
+```
+
+**别在没认领的情况下直接开干**。两个同角色的会话同时看到同一个 side 是常态，
+`--claim` / `kp claim` 是让只有一个真正拿到它的办法。
 
 `pack` 输出一份自包含的 markdown：任务头、分段索引、工作面表、所有分段正文、
 最近上报、附件链接，**以及"交付契约"**——告诉承接方做完该怎么上报。
@@ -258,6 +335,8 @@ kp task show KP-12 --side ui               # 任务全貌
 - 用户说"这个交给 X" → 建 side 或 `kp task side assign`
 - 用户给出**一个需要多角色协作的需求** → 拆 side 并指派
 - 会话快结束了而工作没完 → 上报 `handoff`，把状态写清楚
+- **用户说"盯着 / 等活 / 有活就干 / 配合别人"** → `kp next --wait` 循环，不要 sleep 轮询
+- **你是被派活的一方** → 先 `kp next --claim`，别自己翻任务列表猜哪个该做
 
 **不要用的场景**：纯问答、一次性查询、用户明确说"不用记"。
 

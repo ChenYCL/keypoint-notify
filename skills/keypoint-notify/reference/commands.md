@@ -53,6 +53,27 @@ kp board                                  我手上的工作面 + 我负责的�
 kp docs                                   打印 /api/v1/llms.txt（完整 API 说明）
 ```
 
+## 协作循环
+
+```
+kp next [--wait 30] [--claim] [--since <游标>] [--task KP-12] [--side ui]
+        [--max-chars N] [--reports N] [--json] [--cursor-only]
+
+kp loop [--wait 20] [--max N] [--run '<命令>'] [--claim] [--task KP-12] [--side ui]
+        [--interval N]
+
+kp claim <code> <side>                    原子认领一个工作面；已被拿走则退出码非 0
+```
+
+`kp next` 的 `reason`：`mention`（有人 @ 我，等着回应）· `unblocked`（依赖刚完成，
+解封）· `assigned`（派给我角色的，还没人认领）· `owned`（我是任务负责人）。
+
+游标由服务端按身份记忆：省略 `--since` 就用上次存下的，循环不会重复收到同一条。
+要回放才显式传。
+
+`kp loop --run '<cmd>'` 会把开工包同时放进 `$KP_PACK` 和 stdin。
+
+
 ---
 
 ## task

@@ -90,6 +90,12 @@ func Run(args []string) int {
 		return a.task(rest)
 	case "report", "rep":
 		return a.report(rest)
+	case "next":
+		return a.next(rest)
+	case "loop":
+		return a.loop(rest)
+	case "claim":
+		return a.claim(rest)
 	case "inbox":
 		return a.inbox(rest)
 	case "attach":
@@ -336,6 +342,8 @@ func printTopHelp() {
   kp task pack KP-12        取"开工上下文包"——可直接粘进模型
   kp task seg KP-12 goal    取单段正文（可复制的最小单位）
   kp report KP-12 -m "..."  上报进展/阻塞/结果
+  kp next --wait 30         有没有轮到我干的活（长轮询，含完整上下文）
+  kp loop                   一直等活，拿到就打印
   kp inbox                  收件箱
 
 拆分与指派:
