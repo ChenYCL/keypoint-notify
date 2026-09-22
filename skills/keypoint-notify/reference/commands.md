@@ -73,6 +73,10 @@ kp claim <code> <side>                    原子认领一个工作面；已被�
 
 `kp loop --run '<cmd>'` 会把开工包同时放进 `$KP_PACK` 和 stdin。
 
+**系统自动做的两件事**：side 完成 → 下游自动解封并唤醒；**最后一个 side
+完成 → 任务自动变 done**（`task.status_changed` 的 `payload.reason`
+为 `all_sides_done`）。别手动重复。
+
 
 ---
 

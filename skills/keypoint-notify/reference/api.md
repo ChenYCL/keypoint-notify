@@ -69,7 +69,10 @@ GET /api/v1/me/next?wait=30&claim=1&task=KP-12&side=ui
 | `format` | `md`（默认）/ `json` |
 
 `reason`：`mention`｜`unblocked`｜`assigned`｜`owned`。
-只认领属于调用者的工作面 —— 被 mention 不等于接管别人的面。
+只认领属于调用者的工作面 —— 被 mention 不等于接管别人的面（服务端也会拒绝）。
+
+**自动发生的两件事**：side 完成 → 依赖它的下游解封并发出 `side.unblocked`；
+**最后一个 side 完成 → 任务自动 `done`**，事件 `payload.reason="all_sides_done"`。
 
 ```http
 POST /api/v1/tasks/{code}/sides/{key}/claim   原子认领，同角色只有一个成功
