@@ -146,8 +146,16 @@ func (s *Server) handleSessionDelete(w http.ResponseWriter, _ *http.Request) {
 // cannot both claim the initial admin key.
 var bootstrapMu sync.Mutex
 
-// handleBootstrap creates the very first identity. It stays routed but is only
-// reachable while the system has no identities at all.
+// handleBootstrap claims the owner identity.
+//
+// Routed but narrow: it works while the system is empty, and — importantly —
+// also when the system has identities but no *enabled admin* left. That second
+// case is a real lockout: every privileged endpoint requires admin, nothing in
+// the API can grant admin, and losing the last admin's key would otherwise
+// brick the instance with no way back short of editing the database by hand.
+//
+// It is not a hole: reaching it still requires network access to the server,
+// which is the same trust level as owning the data directory.
 func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Name  string   `json:"name"`
@@ -166,9 +174,15 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	if n > 0 {
+	admins, err := s.St.AdminCount()
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	recovery := n > 0 && admins == 0
+	if n > 0 && !recovery {
 		respondError(w, NewError(http.StatusConflict, "already_bootstrapped",
-			"系统已初始化过，bootstrap 只对空系统开放").
+			"系统已初始化过，bootstrap 只对空系统（或没有可用 admin 的系统）开放").
 			WithHint("已有身份的话用 `kp identity create`（需要 admin）或 POST /api/v1/identities").
 			WithOptions("alternative", []string{"kp init", "POST /api/v1/session"}))
 		return
@@ -188,10 +202,15 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{
+	resp := map[string]any{
 		"identity": idn,
 		"api_key":  key,
 		"warning":  "这个 key 只显示这一次，请立刻保存",
 		"next":     []string{"kp init --key " + key, "或写进 ~/.keypoint/config.json"},
-	})
+	}
+	if recovery {
+		resp["recovery"] = true
+		resp["note"] = "系统里已经没有任何可用的 admin，这是一次恢复性初始化。新身份拿到了 admin。"
+	}
+	writeJSON(w, http.StatusCreated, resp)
 }

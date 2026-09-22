@@ -252,6 +252,20 @@ prompt 上下文交给模型即可开工。
   format=md|json    md（默认）给模型看；json 给程序用
   empty=1           带上还没写内容的固定分段（默认省略）
 
+## 恢复：没有可用的 admin 时
+
+最后一个 admin 的 key 丢了（配置被覆盖、误删、机器重装），系统里所有管理
+操作都会 403，而 API 里没有任何途径授予 admin。这时：
+
+    POST /api/v1/bootstrap  {"name":"<你的名字>","kind":"human"}
+
+会重新开放一次 —— 系统有身份但**一个启用的 admin 都没有**时，它新建一个
+拿 admin 的身份，响应里带 recovery: true。GET /api/v1/health 的 admins
+字段可以提前发现这个状态。
+
+这不是后门：能调这个端点就等于能访问那台机器，和能直接改数据文件是同一个
+信任级别。公网部署请务必配合 Cloudflare Access 之类的入口鉴权。
+
 ## 固定分段 key（骨架）
 
   context      背景

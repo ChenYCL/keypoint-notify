@@ -379,3 +379,22 @@ func boolToInt(b bool) int {
 	}
 	return 0
 }
+
+// AdminCount reports how many enabled identities hold the admin role.
+//
+// The API refuses role changes that need admin without admin, which means a
+// system whose last admin key is lost is unrecoverable through the API. The
+// count exists so bootstrap can detect that state and let the operator back in.
+func (s *Store) AdminCount() (int, error) {
+	ids, err := s.ListIdentities()
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, idn := range ids {
+		if idn.HasRole("admin") && !idn.Disabled {
+			n++
+		}
+	}
+	return n, nil
+}

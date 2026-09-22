@@ -79,6 +79,7 @@ func cmdInit(args []string) int {
 		Status       string `json:"status"`
 		Bootstrapped bool   `json:"bootstrapped"`
 		Version      string `json:"version"`
+		Admins       int    `json:"admins"`
 	}
 	if err := api.Get("/api/v1/health", &health); err != nil {
 		var connErr *client.ConnectionError
@@ -114,9 +115,15 @@ func cmdInit(args []string) int {
 		var boot struct {
 			APIKey   string         `json:"api_key"`
 			Identity model.Identity `json:"identity"`
+			Recovery bool           `json:"recovery"`
+			Note     string         `json:"note"`
 		}
 		if err := api.Post("/api/v1/bootstrap", body, &boot); err != nil {
 			return (&app{cl: api}).fail(err)
+		}
+		if boot.Recovery {
+			fmt.Println("⚠ 这是一次恢复性初始化：该服务端已经没有任何可用的 admin 身份。")
+			fmt.Println("  常见原因是最后一个 admin 的 key 丢了（例如配置被覆盖）。新身份已拿到 admin。")
 		}
 		cfg.APIKey = boot.APIKey
 		cfg.Identity = boot.Identity.Name
@@ -126,9 +133,21 @@ func cmdInit(args []string) int {
 
 	// 3. Still no key? The server is initialized, so it has to come from a human.
 	if cfg.APIKey == "" {
+		if health.Admins == 0 {
+			fmt.Fprintln(os.Stderr, "⚠ 这个服务端已经没有任何可用的 admin —— 常规管理操作全都做不了。")
+			fmt.Fprintf(os.Stderr, "  运维这台机器的人可以认领：curl -X POST %s/api/v1/bootstrap \\\n", cfg.Server)
+			fmt.Fprintln(os.Stderr, "    -H 'Content-Type: application/json' -d '{\"name\":\"<名字>\",\"kind\":\"human\"}'")
+		}
 		if *yes {
 			fmt.Fprintln(os.Stderr, "✗ 服务端已初始化，需要 --key kp_... 才能继续（--yes 不会去猜 key）")
 			return ExitUsage
+		}
+		if health.Admins == 0 {
+			fmt.Println("⚠ 这个服务端已经没有任何可用的 admin —— 常规管理操作全都做不了。")
+			fmt.Println("  如果你就是运维这台机器的人，可以直接认领：")
+			fmt.Printf("    curl -X POST %s/api/v1/bootstrap -H 'Content-Type: application/json' \\\n", cfg.Server)
+			fmt.Println("      -d '{\"name\":\"<你的名字>\",\"kind\":\"human\"}'")
+			fmt.Println()
 		}
 		fmt.Println("服务端已初始化。需要一个 API key 才能接入：")
 		fmt.Println("  · 在已登录的网页 /admin 页面里新建身份或轮换 key")

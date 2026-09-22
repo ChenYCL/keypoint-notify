@@ -180,13 +180,18 @@ func (r *statusRecorder) Flush() {
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	n, _ := s.St.CountIdentities()
+	admins, _ := s.St.AdminCount()
 	writeOK(w, map[string]any{
 		"status":       "ok",
 		"version":      s.Version,
 		"uptime_s":     int(time.Since(s.started).Seconds()),
 		"bootstrapped": n > 0,
-		"server_time":  time.Now().UTC().Format(time.RFC3339),
-		"docs":         "/api/v1/llms.txt",
+		// Zero admins on a bootstrapped system means nobody can administer it.
+		// A client that notices should offer the recovery path instead of
+		// leaving the operator to discover the lockout one 403 at a time.
+		"admins":      admins,
+		"server_time": time.Now().UTC().Format(time.RFC3339),
+		"docs":        "/api/v1/llms.txt",
 	})
 }
 

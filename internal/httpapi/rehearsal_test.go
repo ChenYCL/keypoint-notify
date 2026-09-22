@@ -415,3 +415,55 @@ func TestConcurrentDispatchFansOut(t *testing.T) {
 		t.Errorf("expected all %d faces to be dispatched, got %d", n, len(seen))
 	}
 }
+
+// Losing the last admin's key must not brick the instance.
+//
+// Every privileged endpoint needs admin, and nothing in the API can grant it.
+// Without a way back in, the only remedy is editing the database by hand —
+// which is what happened during a live rehearsal.
+func TestBootstrapRecoversFromAdminLockout(t *testing.T) {
+	h := newHarness(t)
+
+	// A normal, healthy system refuses a second bootstrap.
+	h.do("POST", "/api/v1/bootstrap", map[string]any{"name": "intruder"}, nil, http.StatusConflict)
+
+	// Strip admin from everyone, simulating "the last admin key was lost".
+	var ids struct {
+		Identities []struct {
+			ID    string   `json:"id"`
+			Name  string   `json:"name"`
+			Roles []string `json:"roles"`
+		} `json:"identities"`
+	}
+	h.do("GET", "/api/v1/identities", nil, &ids, http.StatusOK)
+	for _, idn := range ids.Identities {
+		without := []string{}
+		for _, r := range idn.Roles {
+			if r != "admin" {
+				without = append(without, r)
+			}
+		}
+		if len(without) == 0 {
+			without = []string{"member"}
+		}
+		h.do("PATCH", "/api/v1/identities/"+idn.ID, map[string]any{"roles": without}, nil, http.StatusOK)
+	}
+
+	// Now nobody can do admin things...
+	h.do("POST", "/api/v1/identities", map[string]any{"name": "nope"}, nil, http.StatusForbidden)
+
+	// ...but bootstrap lets an operator back in, and says that is what happened.
+	var boot struct {
+		APIKey   string `json:"api_key"`
+		Recovery bool   `json:"recovery"`
+	}
+	h.do("POST", "/api/v1/bootstrap", map[string]any{"name": "rescuer"}, &boot, http.StatusCreated)
+	if !boot.Recovery {
+		t.Error("a bootstrap that recovered from lockout should say so")
+	}
+	if boot.APIKey == "" {
+		t.Fatal("recovery should hand back a usable key")
+	}
+	h.doAs(boot.APIKey, "POST", "/api/v1/identities",
+		map[string]any{"name": "after-recovery"}, nil, http.StatusCreated)
+}
