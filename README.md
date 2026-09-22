@@ -120,7 +120,8 @@ make skill          # → ~/.claude/skills/keypoint-notify
 
 需要 Go 1.25+（下限由 `modernc.org/sqlite` 决定，不是本项目的代码）。
 
-公网访问推荐 **Cloudflare Tunnel** 而不是开端口，见
+公网访问推荐 **Cloudflare Tunnel** 而不是开端口；也支持 Docker（仓库根目录有
+`Dockerfile`，两阶段构建、运行镜像里没有 Go 和 C 库）。两种方式都见
 [`docs/deploy-tunnel.md`](docs/deploy-tunnel.md)。
 
 ---

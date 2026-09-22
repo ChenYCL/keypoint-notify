@@ -1,0 +1,9 @@
+.git
+kp
+data
+*.db
+*.db-shm
+*.db-wal
+.github
+docs
+skills

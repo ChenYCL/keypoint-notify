@@ -158,36 +158,27 @@ launchctl kickstart -k gui/$(id -u)/com.local.keypoint
 
 ## 6. Docker（可选）
 
-如果更想扔在服务器上：
-
-```dockerfile
-FROM golang:1.26-alpine AS build
-WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /kp ./cmd/keypoint
-
-FROM alpine:3.20
-RUN adduser -D -u 10001 kp
-COPY --from=build /kp /usr/local/bin/kp
-USER kp
-VOLUME /data
-EXPOSE 8787
-ENTRYPOINT ["kp", "serve", "--addr", "0.0.0.0:8787", "--data", "/data"]
-```
-
-`CGO_ENABLED=0` 能成立是因为 SQLite 驱动是纯 Go 的（`modernc.org/sqlite`），
-镜像里不需要任何 C 运行库。
+仓库根目录有 `Dockerfile`，两阶段构建，产出的运行镜像里没有 Go、没有 C 库：
 
 ```bash
 docker build -t keypoint:latest .
-docker run -d --name keypoint -p 127.0.0.1:8787:8787 -v keypoint-data:/data keypoint:latest
+
+docker run -d --name keypoint \
+  -p 127.0.0.1:8787:8787 \
+  -v keypoint-data:/data \
+  keypoint:latest
+
+# 同一个二进制在容器里也能当 CLI 用
+docker exec keypoint kp init --server http://127.0.0.1:8787
+docker exec keypoint kp task list
 ```
 
-容器里绑 `0.0.0.0`，宿主机只映射到 `127.0.0.1`，安全性不变。
+`CGO_ENABLED=0` 能成立是因为 SQLite 驱动是纯 Go 的（`modernc.org/sqlite`），
+运行镜像里不需要任何 C 运行库。`HEALTHCHECK` 打的是免鉴权的
+`/api/v1/health`，所以不用把 key 烤进镜像。
 
----
+容器里绑 `0.0.0.0`，宿主机只映射到 `127.0.0.1`，安全性不变。
+数据库和附件都在 `/data` 卷里，`docker restart` 之后还在。
 
 ## 安全清单
 
