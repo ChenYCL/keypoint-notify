@@ -36,7 +36,7 @@ jobs:
             curl -sf http://127.0.0.1:8877/api/v1/health && break
             sleep 0.3
           done
-          curl -sf http://127.0.0.1:8877/api/v1/health | grep -q '"status":"ok"'
+          curl -sf http://127.0.0.1:8877/api/v1/health | grep -q '"status": *"ok"'
           # The API manual must be readable without credentials.
           curl -sf http://127.0.0.1:8877/api/v1/llms.txt | grep -q 'pack'
           curl -sf -o /dev/null http://127.0.0.1:8877/
