@@ -17,10 +17,20 @@ RUN CGO_ENABLED=0 go build -trimpath \
       -ldflags="-s -w -X github.com/ChenYCL/keypoint-notify/internal/cli.Version=${VERSION}" \
       -o /out/kp ./cmd/keypoint
 
+# Client builds for every platform install.sh supports. The server hands these
+# out from bin/ beside itself — without them a Mac colleague's
+# `curl …/install.sh | sh` has nothing to download.
+RUN for t in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do \
+      CGO_ENABLED=0 GOOS=${t%/*} GOARCH=${t#*/} go build -trimpath \
+        -ldflags="-s -w -X github.com/ChenYCL/keypoint-notify/internal/cli.Version=${VERSION}" \
+        -o /out/bin/kp-${t%/*}-${t#*/} ./cmd/keypoint || exit 1; \
+    done
+
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata \
  && adduser -D -u 10001 -h /data kp
 COPY --from=build /out/kp /usr/local/bin/kp
+COPY --from=build /out/bin/ /usr/local/bin/bin/
 
 # The database and uploaded blobs both live here; mount a volume over it.
 VOLUME /data

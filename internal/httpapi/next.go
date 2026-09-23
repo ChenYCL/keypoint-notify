@@ -59,6 +59,9 @@ func (s *Server) handleNext(w http.ResponseWriter, r *http.Request) {
 		// a way to say so. Without this it is offered the same item forever and
 		// the only escape is to stop asking.
 		Exclude: parseCSV(q.Get("exclude")),
+		// Waiting means "wake me for something new". A plain call (wait=0)
+		// still answers "what is on my plate", standing items included.
+		OnlyNew: wait > 0,
 	}
 
 	claim := q.Get("claim") == "1" || q.Get("claim") == "true"

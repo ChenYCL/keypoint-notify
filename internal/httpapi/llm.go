@@ -185,6 +185,10 @@ docs:     本文档是机器可读的权威说明；/api/v1/schema 是同一份�
 
 参数：
   wait=<秒>     没有活时在服务端挂起多久（长轮询，上限 60）。0 = 立刻返回
+                wait>0 时只为**新的东西**醒来：已经在你名下、之后没变化的工作面，
+                和你负责、之后没动静的任务，都不会让它立刻返回 —— 所以提完问题
+                等回答时，它真的会挂着等，而不是把你自己的面反复还给你。
+                新会话想看手上已认领的：wait=0，或 GET /api/v1/me/board
   claim=1       拿到属于我的工作面就原子认领 —— 同角色的多个会话只有一个能抢到
   since=<游标>  显式指定从哪之后看。**省略时用你上次调用存下的游标**，
                 所以循环里不需要自己带着游标跑；不带 since 也不会反复收到同一条提及
@@ -197,9 +201,12 @@ docs:     本文档是机器可读的权威说明；/api/v1/schema 是同一份�
 reason 的取值决定了你该怎么做：
 
   mention    有人在某个上报里 @ 了我，在等我回应。**不是让我接手他的工作面**
-  unblocked  我的工作面依赖刚完成，解封了
-  assigned   指派给我角色的工作面，依赖就绪且还没人认领
+  unblocked  我的工作面依赖刚完成，解封了（它有 deps，且都已 done）
+  assigned   指派给我角色的工作面（没有依赖），还没人认领
   owned      我是任务负责人，任务有新动静
+
+被 blocker 上报置为 blocked 的工作面不会被当成活派出去 —— 它在等的东西
+依赖图不知道。等提问方被回答（mention）后自己改回 todo/doing，或它的依赖完成。
 
 响应是 markdown（默认）或 JSON，开头有一段「为什么是你」，然后是完整开工包
 （含交付契约）。JSON 形状：{work:{reason,explanation,task,side,dependents}, cursor, claimed, pack}
@@ -329,6 +336,35 @@ prompt 上下文交给模型即可开工。
   POST   /api/v1/files                         multipart 上传，字段名 file
   POST   /api/v1/tasks/{code}/files            直接挂到任务上
   POST   /api/v1/inbox/read                    {"ids":[...]}，空数组=全部已读
+
+## 建任务怎么调
+
+  POST /api/v1/tasks          （CLI：kp task new --from-json -，同一个形状）
+  {
+    "title": "登录页验证码倒计时切后台后错位",      // 必填
+    "kind": "bug",                 // bug|feature|chore|research|review|incident
+    "priority": "P1",              // P0..P3
+    "summary": "一句话",
+    "owner_role": "pm",            // 负责角色；owner_identity 指定到人
+    "labels": ["auth"],
+    "links": [{"kind": "repo", "url": "https://..."}],
+    "segments": {                  // ★ 分段都放这里，不是顶层字段
+      "context": "…", "goal": "…", "deliverable": "…", "constraint": "…",
+      "acceptance": "…", "interface": "…", "files": "…",
+      "踩坑记录": "自由分段，中文 key 保留"
+    },
+    "sides": [                     // 工作面：各自指派、各自有依赖
+      {"key": "api", "title": "后端接口", "assignee_role": "backend",
+       "segments": {"做法提示": "…"}},
+      {"key": "ui", "title": "前端", "assignee_role": "frontend", "deps": ["api"]}
+    ],
+    "watchers": ["alice"],
+    "notify": ["@review"]
+  }
+
+严格模式：拼错的字段名会报 invalid_json，响应里 field 是那个字段、
+did_you_mean 是它该在的位置（比如 "acceptance" → segments.acceptance），
+options 是顶层可用的字段。
 
 ## 上报怎么调
 

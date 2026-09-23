@@ -13,8 +13,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
+	"sort"
 	"strings"
 
+	"github.com/ChenYCL/keypoint-notify/internal/model"
 	"github.com/ChenYCL/keypoint-notify/internal/store"
 )
 
@@ -114,10 +117,87 @@ func decodeJSON(r *http.Request, v any) error {
 	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 8<<20))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
+		if field, ok := strings.CutPrefix(err.Error(), `json: unknown field "`); ok {
+			return unknownFieldError(strings.TrimSuffix(field, `"`), v)
+		}
 		return NewError(http.StatusBadRequest, "invalid_json", "请求体不是合法 JSON: %v", err).
 			WithHint("字段名拼错也会报这个错；完整字段表见 /api/v1/llms.txt")
 	}
 	return nil
+}
+
+// unknownFieldError turns encoding/json's bare `unknown field "x"` into an
+// error a model can recover from on its own.
+//
+// Watching an agent build a task from a requirement: it put "acceptance" and
+// "constraints" at the top level and "role" on each side, got `unknown field
+// "acceptance"` plus "see llms.txt", and spent the rest of its turns grepping
+// documentation. The two things it needed were where the field belongs and
+// what the valid names are — both known right here.
+//
+// The code stays invalid_json: codes are a stability contract, the prose and
+// the suggestion fields are not.
+func unknownFieldError(field string, target any) *APIError {
+	fields := jsonFieldNames(reflect.TypeOf(target))
+	e := NewError(http.StatusBadRequest, "invalid_json", "请求体里有不认识的字段 %q", field).
+		WithOptions(field, fields)
+
+	lower := strings.ToLower(field)
+	for _, k := range model.SkeletonKeys {
+		if lower == k || levenshtein(lower, k) <= 2 {
+			return e.WithSuggest("segments."+k).
+				WithHint("分段不是顶层字段：写成 \"segments\": {%q: \"...\"}（工作面自己的分段放在该工作面的 \"segments\" 里）", k)
+		}
+	}
+	if s, ok := fieldAliases[lower]; ok {
+		return e.WithSuggest(s).WithHint("用 %q；完整形状见 `kp task new --help` 或 /api/v1/llms.txt", s)
+	}
+	best, dist := "", 3
+	for _, f := range fields {
+		if d := levenshtein(lower, f); d < dist {
+			best, dist = f, d
+		}
+	}
+	if best != "" {
+		e.WithSuggest(best)
+	}
+	return e.WithHint("options 里是这个请求体顶层可用的字段；完整形状见 `kp task new --help` 或 /api/v1/llms.txt")
+}
+
+// fieldAliases maps names models reach for to the ones this API uses. Only
+// names seen in practice belong here — this is not a synonym dictionary.
+var fieldAliases = map[string]string{
+	"role":         "assignee_role（工作面上）/ owner_role（任务上）",
+	"assignee":     "assignee_role",
+	"owner":        "owner_role",
+	"depends_on":   "deps",
+	"dependencies": "deps",
+	"description":  "summary",
+	"type":         "kind",
+	"tags":         "labels",
+	"contract":     "segments.interface",
+	"deliverables": "segments.deliverable",
+	"handoff":      "segments.deliverable",
+}
+
+// jsonFieldNames lists the JSON names a request struct accepts at its top
+// level, sorted.
+func jsonFieldNames(t reflect.Type) []string {
+	for t != nil && t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t == nil || t.Kind() != reflect.Struct {
+		return nil
+	}
+	out := []string{}
+	for i := 0; i < t.NumField(); i++ {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		if name != "" && name != "-" {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // levenshtein returns the edit distance between two strings, used for

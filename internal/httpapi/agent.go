@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -323,6 +324,11 @@ func (s *Server) handleInstallScript(w http.ResponseWriter, r *http.Request) {
 		"echo \"→ 下载 kp ...\"\n" +
 		"arch=$(uname -m)\n" +
 		"os=$(uname -s | tr 'A-Z' 'a-z')\n" +
+		"# Apple Silicon 上从 Rosetta 下的 shell（例如 Intel 版 Homebrew 的 bash）运行时，\n" +
+		"# uname -m 会报 x86_64 —— 按硬件判断，别给 M 系列芯片发 amd64。\n" +
+		"if [ \"$os\" = darwin ] && [ \"$(/usr/sbin/sysctl -n hw.optional.arm64 2>/dev/null)\" = 1 ]; then\n" +
+		"  arch=arm64\n" +
+		"fi\n" +
 		"case \"$os-$arch\" in\n" +
 		"  darwin-arm64)   GOARCH=arm64 ;;\n" +
 		"  darwin-x86_64)  GOARCH=amd64 ;;\n" +
@@ -424,6 +430,13 @@ func crossBinary(osName, arch string) (string, bool) {
 	path := filepath.Join(filepath.Dir(self), "bin", "kp-"+osName+"-"+arch)
 	if st, err := os.Stat(path); err == nil && !st.IsDir() {
 		return path, true
+	}
+	// Asked for the platform the server itself runs on: that binary is right
+	// here. Without this a server with no bin/ directory — the Docker image,
+	// a plain `make install` — answered 404 to every install.sh, including
+	// clients on its own platform.
+	if osName == runtime.GOOS && arch == runtime.GOARCH {
+		return self, true
 	}
 	return "", false
 }

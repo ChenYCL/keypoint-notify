@@ -47,6 +47,17 @@ type NextWorkQuery struct {
 	// Exclude lists task codes to skip, so a session that has judged an item
 	// not-its-to-take can move on instead of being offered it forever.
 	Exclude []string
+	// OnlyNew is set by long-polling callers. Standing items — a face already
+	// mine, a task I own — then only count if they changed after Since.
+	//
+	// Without it `kp next --wait 30` never waits while the caller holds an
+	// unfinished face: the face itself is "work addressed to me", so it comes
+	// straight back, and a session that asked a question and is waiting for
+	// the answer spins on its own face (re-reading the whole pack each time)
+	// instead of blocking until the mention arrives. Unclaimed faces and
+	// mentions are unaffected: the former still need an owner, the latter are
+	// already cursor-gated.
+	OnlyNew bool
 }
 
 // ClaimNext finds the most urgent unclaimed work face for this identity and
@@ -83,12 +94,7 @@ func (s *Store) ClaimNext(q NextWorkQuery, who model.Identity) (*NextWork, bool,
 		if err != nil {
 			return nil, false, err
 		}
-		wasBlocked := sd.Status == model.SideBlocked
-		reason, expl := "assigned", fmt.Sprintf("%s 的 %s 工作面指派给了 @%s，且依赖已就绪", t.Code, sd.Key, fresh.AssigneeRole)
-		if wasBlocked {
-			reason = "unblocked"
-			expl = fmt.Sprintf("%s 的 %s 工作面原本被依赖挡住，现在依赖已完成", t.Code, sd.Key)
-		}
+		reason, expl := readyReason(t, fresh)
 		return &NextWork{
 			Reason: reason, Explanation: expl, Task: t, Side: &fresh,
 			Dependents: s.dependentsOf(t, sd.Key),
@@ -136,12 +142,7 @@ func (s *Store) nextMention(q NextWorkQuery) (*NextWork, error) {
 	args := []any{}
 	// Never hand someone their own report back to them.
 	args = append(args, q.IdentityName)
-	// `since` is an event cursor; translate it to the timestamp it sits at.
-	sinceMS := int64(0)
-	if q.Since > 0 {
-		_ = s.db.QueryRow(`SELECT created_at FROM events WHERE id = ?`, q.Since).Scan(&sinceMS)
-	}
-	args = append(args, sinceMS)
+	args = append(args, s.cursorTime(q.Since))
 	for _, x := range people {
 		args = append(args, x)
 	}
@@ -203,6 +204,30 @@ func (s *Store) nextMention(q NextWorkQuery) (*NextWork, error) {
 	return nil, rows.Err()
 }
 
+// cursorTime translates an event cursor into the timestamp it sits at; zero
+// when there is no cursor.
+func (s *Store) cursorTime(since int64) int64 {
+	ms := int64(0)
+	if since > 0 {
+		_ = s.db.QueryRow(`SELECT created_at FROM events WHERE id = ?`, since).Scan(&ms)
+	}
+	return ms
+}
+
+// readyReason says why a ready face is being handed over.
+//
+// A face with dependencies is created `todo` and gated on its deps, not on its
+// status — so "it used to be blocked" is the wrong test for "unblocked". The
+// face that waited on something is the one with deps, and it is ready now
+// because they are all done.
+func readyReason(t model.Task, sd model.Side) (reason, explanation string) {
+	if len(sd.Deps) > 0 {
+		return "unblocked", fmt.Sprintf("%s 的 %s 工作面依赖的 %s 已全部完成，轮到你了",
+			t.Code, sd.Key, strings.Join(sd.Deps, "、"))
+	}
+	return "assigned", fmt.Sprintf("%s 的 %s 工作面指派给了 @%s", t.Code, sd.Key, sd.AssigneeRole)
+}
+
 // displayName resolves a report author for an explanation line.
 func displayName(s *Store, id string) string {
 	if id == "" {
@@ -238,7 +263,11 @@ func (s *Store) readySides(q NextWorkQuery, limit int, claimableOnly bool) ([]mo
 		args = append(args, vals...)
 	}
 
-	add("s.status IN ('blocked','todo')")
+	// Only `todo` is ready. `blocked` is set by a blocker report — the face is
+	// waiting on something the dependency graph does not know about, so handing
+	// it out as work (with "your dependency finished") was simply false.
+	// Dependency-gated faces are `todo` and are gated by the clause below.
+	add("s.status = ?", model.SideTodo)
 	add("("+roleOr+" OR s.assignee_identity = ?)", append(roleArgs, q.IdentityName)...)
 	add(`NOT EXISTS (
 		   SELECT 1 FROM sides d
@@ -251,6 +280,8 @@ func (s *Store) readySides(q NextWorkQuery, limit int, claimableOnly bool) ([]mo
 		// candidate for a claim — but it *is* still "work addressed to me" for
 		// the read-only question, which is why this is opt-in.
 		add("s.assignee_identity = ''")
+	} else if since := s.cursorTime(q.Since); q.OnlyNew && since > 0 {
+		add("(s.assignee_identity = '' OR (s.assignee_identity = ? AND s.updated_at > ?))", q.IdentityName, since)
 	} else {
 		add("(s.assignee_identity = ? OR s.assignee_identity = '')", q.IdentityName)
 	}
@@ -306,12 +337,7 @@ func (s *Store) nextReadySide(q NextWorkQuery) (*NextWork, error) {
 	if err != nil {
 		return nil, err
 	}
-	wasBlocked := sd.Status == model.SideBlocked
-	reason, expl := "assigned", fmt.Sprintf("%s 的 %s 工作面指派给了 @%s，且依赖已就绪", t.Code, sd.Key, sd.AssigneeRole)
-	if wasBlocked {
-		reason = "unblocked"
-		expl = fmt.Sprintf("%s 的 %s 工作面原本被依赖挡住，现在依赖已完成", t.Code, sd.Key)
-	}
+	reason, expl := readyReason(t, sd)
 	return &NextWork{
 		Reason: reason, Explanation: expl, Task: t, Side: &sd,
 		Dependents: s.dependentsOf(t, sd.Key),
@@ -321,6 +347,12 @@ func (s *Store) nextReadySide(q NextWorkQuery) (*NextWork, error) {
 func (s *Store) nextOwned(q NextWorkQuery) (*NextWork, error) {
 	where := []string{"t.owner_identity = ?", "t.status NOT IN ('done','archived')"}
 	args := []any{q.IdentityName}
+	// An open task I own is always "mine"; waiting callers only want it back
+	// when something happened to it.
+	if since := s.cursorTime(q.Since); q.OnlyNew && since > 0 {
+		where = append(where, "t.updated_at > ?")
+		args = append(args, since)
+	}
 	if q.TaskCode != "" {
 		where = append(where, "t.code = ?")
 		args = append(args, q.TaskCode)
@@ -431,13 +463,14 @@ func releaseDependentsTx(tx *sql.Tx, taskID, finishedKey string, now int64) ([]m
 		if pending > 0 {
 			continue
 		}
-		if sd.Status == model.SideBlocked {
-			if _, err := tx.Exec(`UPDATE sides SET status=?, updated_at=? WHERE id=?`,
-				model.SideTodo, now, sd.ID); err != nil {
-				return nil, err
-			}
-			sd.Status = model.SideTodo
+		// Touch the face even when it was already `todo`: someone may have
+		// claimed it in advance and be long-polling with OnlyNew, and "its
+		// dependencies just finished" is exactly the change they wait for.
+		if _, err := tx.Exec(`UPDATE sides SET status=?, updated_at=? WHERE id=?`,
+			model.SideTodo, now, sd.ID); err != nil {
+			return nil, err
 		}
+		sd.Status = model.SideTodo
 		released = append(released, sd)
 	}
 	return released, nil
