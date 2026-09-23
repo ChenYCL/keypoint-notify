@@ -24,12 +24,21 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Never let an API-shaped path fall through to the SPA shell. A client that
+	// probes /api/v1/... or /skill/... and gets 200 + HTML will conclude the
+	// endpoint exists and try to parse it; an honest 404 tells it the truth.
+	// This is how a stale server got mistaken for a current one during a deploy.
+	if isMachinePath(path) {
+		http.NotFound(w, r)
+		return
+	}
+
 	data, err := fs.ReadFile(s.Web, path)
 	if err != nil {
 		// Unknown paths are SPA routes (/t/KP-12, /inbox, /admin): hand back
 		// the shell and let the client router decide. A request that looks like
 		// an asset but is not embedded gets an honest 404 instead of HTML.
-		if looksLikeAsset(path) {
+		if looksLikeAsset(path) || isMachinePath(path) {
 			http.NotFound(w, r)
 			return
 		}
@@ -85,4 +94,13 @@ func contentTypeFor(path string) string {
 		return "image/x-icon"
 	}
 	return "application/octet-stream"
+}
+
+// isMachinePath reports whether a path is meant for a program rather than a
+// browser. These must never be answered with the SPA shell: a 200 with an HTML
+// body is indistinguishable from success to `curl -f`, to a health probe, or to
+// an agent deciding whether an endpoint exists.
+func isMachinePath(path string) bool {
+	return strings.HasPrefix(path, "api/") || strings.HasPrefix(path, "skill/") ||
+		path == "api" || path == "skill"
 }

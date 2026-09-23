@@ -866,3 +866,28 @@ func TestEventCursorSyncsOrReplays(t *testing.T) {
 		t.Error("backlog=1 should return history")
 	}
 }
+
+// A program-shaped path must never be answered with the SPA shell.
+//
+// During a deploy a stale server answered /skill/SKILL.md with 200 + HTML,
+// which looked exactly like success to every probe we ran — the endpoint only
+// appeared to exist because the SPA fallback swallowed it.
+func TestMachinePathsAreNeverTheSPA(t *testing.T) {
+	h := newHarness(t)
+
+	for _, path := range []string{"/api/v1/nope", "/skill/nope.md", "/skill", "/api"} {
+		req, _ := http.NewRequest("GET", h.srv.URL+path, nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		body := make([]byte, 64)
+		n, _ := resp.Body.Read(body)
+		resp.Body.Close()
+		head := string(body[:n])
+		if strings.Contains(head, "<!DOCTYPE html") {
+			t.Errorf("%s returned the SPA shell (status %d) — a machine client reads that as success",
+				path, resp.StatusCode)
+		}
+	}
+}
