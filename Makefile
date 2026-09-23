@@ -51,3 +51,20 @@ uninstall: ## 卸载二进制与 skill 链接
 clean: ## 清掉编译产物
 	rm -f $(BINARY)
 	go clean -testcache
+
+DIST_PLATFORMS := darwin/arm64 darwin/amd64 linux/amd64 linux/arm64
+
+dist: ## 交叉编译四个平台到 dist/（给 install.sh 用）
+	@mkdir -p dist
+	@for t in $(DIST_PLATFORMS); do \
+	  goos=$${t%%/*}; goarch=$${t##*/}; \
+	  CGO_ENABLED=0 GOOS=$$goos GOARCH=$$goarch go build -trimpath \
+	    -ldflags="$(LDFLAGS)" -o dist/kp-$$goos-$$goarch ./cmd/keypoint & \
+	done; wait
+	@ls -lh dist/ | tail -n +2
+	@echo "把 dist/ 放到服务端二进制旁边的 bin/ 目录，install.sh 就能按平台发对应版本"
+
+release-bin: dist ## dist/ 移到当前二进制的同级 bin/
+	@mkdir -p $(PREFIX)/bin/bin
+	@cp dist/* $(PREFIX)/bin/bin/
+	@echo "已放到 $(PREFIX)/bin/bin/"

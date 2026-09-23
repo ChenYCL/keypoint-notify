@@ -126,9 +126,19 @@ curl -H "Authorization: Bearer $KP_KEY" $KP/api/v1/llms.txt
 curl -fsSL "http://<服务端>/install.sh?key=kp_xxx" | sh
 ```
 
-`install.sh` 由服务端自己生成，做三件事：下载对应平台的 `kp`、
-`chmod +x`、用这个 key 接入并把 skill 装到本机认识的 CLI 里。不需要
-仓库、不需要包管理器、不需要 Go。
+`install.sh` 由服务端自己生成，做三件事：下载**对应你自己平台**的 `kp`
+（服务端跑在 Linux 不代表你用 Linux）、`chmod +x`、用这个 key 接入并把
+skill 装到本机认识的 CLI 里。不需要仓库、不需要包管理器、不需要 Go。
+
+**服务端要先准备各平台的二进制**，否则 Mac 同事会拿到跑不起来的文件：
+
+```bash
+make dist           # 交叉编译 darwin/linux × arm64/amd64 到 dist/
+make release-bin    # 放到服务端二进制旁边的 bin/
+```
+
+没有对应平台时 `/kp?os=…&arch=…` 会 404 并告诉你 `go install` 的地址，
+不会发一个错的二进制给你。
 
 不带 `key` 就只装二进制：
 

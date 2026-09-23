@@ -891,3 +891,45 @@ func TestMachinePathsAreNeverTheSPA(t *testing.T) {
 		}
 	}
 }
+
+// install.sh must fetch the binary for the *client's* platform, not the
+// server's.
+//
+// A hub usually runs on a Linux box while half the team is on macOS. Before
+// this, the script checked that the client's platform was known and then
+// downloaded the server's own binary regardless — a Mac user got a Linux ELF
+// and `curl | sh` looked like it had worked.
+func TestInstallScriptFetchesClientPlatform(t *testing.T) {
+	h := newHarness(t)
+
+	body := h.text("/install.sh", http.StatusOK)
+	if !strings.Contains(body, "GOARCH=arm64") || !strings.Contains(body, "GOARCH=amd64") {
+		t.Error("install.sh should translate uname output to Go's arch names")
+	}
+	if !strings.Contains(body, "kp?os=$os&arch=$GOARCH") {
+		t.Errorf("install.sh must request a platform-specific binary, got:\n%s", body)
+	}
+	if strings.Contains(body, `curl -fsSL "$BASE/kp" -o`) {
+		t.Error("install.sh still downloads the server's own binary unconditionally")
+	}
+}
+
+// A platform the server has no build for must 404 with instructions, not hand
+// back a binary that will not run.
+func TestBinaryNotFoundForUnknownPlatform(t *testing.T) {
+	h := newHarness(t)
+
+	req, _ := http.NewRequest("GET", h.srv.URL+"/kp?os=plan9&arch=mips", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("unknown platform should 404, got %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "go install") {
+		t.Errorf("the 404 should tell the user how to get a build, got %q", body)
+	}
+}

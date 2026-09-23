@@ -3,6 +3,8 @@ package httpapi
 import (
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -322,11 +324,17 @@ func (s *Server) handleInstallScript(w http.ResponseWriter, r *http.Request) {
 		"arch=$(uname -m)\n" +
 		"os=$(uname -s | tr 'A-Z' 'a-z')\n" +
 		"case \"$os-$arch\" in\n" +
-		"  darwin-arm64|darwin-x86_64|linux-x86_64|linux-aarch64) ;;\n" +
-		"  *) echo \"✗ 这个平台还没有预编译产物（$os-$arch）。请自己编译：\" >&2\n" +
-		"     echo \"    git clone <repo> && cd keypoint-notify && make build\" >&2; exit 1 ;;\n" +
+		"  darwin-arm64)   GOARCH=arm64 ;;\n" +
+		"  darwin-x86_64)  GOARCH=amd64 ;;\n" +
+		"  linux-x86_64)   GOARCH=amd64 ;;\n" +
+		"  linux-aarch64)  GOARCH=arm64 ;;\n" +
+		"  *) echo \"✗ 这个平台还没有预编译产物（$os-$arch）。\" >&2\n" +
+		"     echo \"    自己编译：go install github.com/ChenYCL/keypoint-notify/cmd/keypoint@latest\" >&2\n" +
+		"     exit 1 ;;\n" +
 		"esac\n" +
-		"curl -fsSL \"$BASE/kp\" -o \"$BIN/kp\"\n" +
+		"# 要对应平台的二进制，不是服务端自己跑的那个 —— 服务端多半在 Linux 上，\n" +
+		"# 而使用者可能是 Mac。\n" +
+		"curl -fsSL \"$BASE/kp?os=$os&arch=$GOARCH\" -o \"$BIN/kp\"\n" +
 		"chmod +x \"$BIN/kp\"\n" +
 		"echo \"✓ kp 已装到 $BIN/kp\"\n\n" +
 		"case \":$PATH:\" in *\":$BIN:\"*) ;;\n" +
@@ -350,12 +358,34 @@ func (s *Server) handleInstallScript(w http.ResponseWriter, r *http.Request) {
 	writeText(w, http.StatusOK, "text/x-shellscript", body)
 }
 
-// handleBinary serves the running binary so a new machine can bootstrap itself
-// without the repo, a release page, or a package manager.
+// handleBinary serves a kp binary so a new machine can bootstrap itself without
+// the repo, a release page, or a package manager.
+//
+// ?os=darwin&arch=arm64 picks a cross-compiled binary from a `bin/` directory
+// beside the running one — a Mac colleague running install.sh must not receive
+// the Linux binary the server happens to be running. Without the parameters the
+// server sends itself, which is right for the machine it is on.
 //
 // Same trust level as the server itself: anyone who can reach this endpoint can
 // already read every task in it.
 func (s *Server) handleBinary(w http.ResponseWriter, r *http.Request) {
+	osName := strings.TrimSpace(r.URL.Query().Get("os"))
+	arch := strings.TrimSpace(r.URL.Query().Get("arch"))
+
+	if osName != "" && arch != "" {
+		if path, ok := crossBinary(osName, arch); ok {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Disposition", `attachment; filename="kp"`)
+			http.ServeFile(w, r, path)
+			return
+		}
+		writeText(w, http.StatusNotFound, "text/plain",
+			"这个服务端没有 "+osName+"/"+arch+" 的预编译产物。\n"+
+				"自行编译：go install github.com/ChenYCL/keypoint-notify/cmd/keypoint@latest\n"+
+				"或让运维把 kp-"+osName+"-"+arch+" 放到服务端二进制旁边的 bin/ 目录里。\n")
+		return
+	}
+
 	if binarySelf == nil {
 		writeText(w, http.StatusNotFound, "text/plain",
 			"this build does not expose its own binary\n")
@@ -369,6 +399,33 @@ func (s *Server) handleBinary(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", `attachment; filename="kp"`)
 	http.ServeFile(w, r, path)
+}
+
+// crossBinary looks for a pre-built binary for another platform.
+//
+// Naming is deliberately conventional so an operator can drop files in without
+// reading code: bin/kp-<os>-<arch>, next to the running binary. Go's own arch
+// names (amd64, arm64) are used rather than uname's (x86_64, aarch64); the
+// installer translates.
+func crossBinary(osName, arch string) (string, bool) {
+	if binarySelf == nil {
+		return "", false
+	}
+	self, err := binarySelf()
+	if err != nil {
+		return "", false
+	}
+	// Reject anything that could climb out of the directory.
+	for _, part := range []string{osName, arch} {
+		if strings.ContainsAny(part, "/\\..") {
+			return "", false
+		}
+	}
+	path := filepath.Join(filepath.Dir(self), "bin", "kp-"+osName+"-"+arch)
+	if st, err := os.Stat(path); err == nil && !st.IsDir() {
+		return path, true
+	}
+	return "", false
 }
 
 // binarySelf is injected at startup: the HTTP layer asks for the path of the
