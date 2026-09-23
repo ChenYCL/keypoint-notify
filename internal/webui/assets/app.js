@@ -323,8 +323,12 @@ function route() {
   const path = location.pathname;
   document.querySelectorAll('.nav a[data-nav]').forEach(a => {
     const target = a.getAttribute('href');
-    a.classList.toggle('active',
-      target === '/' ? (path === '/' || path.startsWith('/t/')) : path.startsWith(target));
+    const active = target === '/'
+      ? path === '/'
+      : target === '/board'
+        ? (path.startsWith('/board') || path.startsWith('/t/'))
+        : path.startsWith(target);
+    a.classList.toggle('active', active);
   });
   if (path.startsWith('/t/')) {
     S.route = { name: 'task', code: decodeURIComponent(path.slice(3)) };
@@ -332,8 +336,9 @@ function route() {
   }
   if (path.startsWith('/inbox')) { S.route = { name: 'inbox' }; return renderInbox(); }
   if (path.startsWith('/admin')) { S.route = { name: 'admin' }; return renderAdmin(); }
-  S.route = { name: 'board' };
-  return renderBoard();
+  if (path.startsWith('/board') || path.startsWith('/t/')) { S.route = { name: 'board' }; return renderBoard(); }
+  S.route = { name: 'home' };
+  return renderHome();
 }
 
 function setView(html, narrow) {
@@ -343,6 +348,156 @@ function setView(html, narrow) {
 }
 
 function loading() { setView('<div class="spinner">加载中…</div>'); }
+
+/* ---------------------------------------------------------------- home
+ *
+ * Onboarding first, board below it. The most common reason to open this page
+ * for the first time is "how do I put an agent to work" — making someone hunt
+ * through menus for that is the same mistake as burying the install command in
+ * a README. Anyone who is here to work, not to onboard, scrolls once.
+ */
+async function renderHome() {
+  loading();
+  let tasks = { columns: {}, count: 0 }, who = S.me;
+  try { tasks = await api('GET', '/tasks?group=status&limit=6'); } catch (e) { /* board is optional here */ }
+
+  const base = location.origin;
+  const role = who ? who.role : 'member';
+  const ident = who ? who.identity.name : 'you';
+
+  // The prompt is rendered server-side so it cannot drift from the API it
+  // describes, and so it carries this server's real URL.
+  let prompt = '';
+  try { prompt = await api('GET', '/agent-prompt', undefined, true); } catch (e) { /* show the fallback */ }
+
+  const quick = [
+    ['问有没有轮到我的活', 'kp next --wait 30 --claim'],
+    ['我手上有什么', 'kp board'],
+    ['拿某个任务的开工包', 'kp task pack KP-1 --side ui'],
+    ['上报进展 / 阻塞 / 结果', 'kp report KP-1 --side ui --type result -m "..."'],
+  ];
+
+  let html = '<div class="home">';
+
+  html += '<section class="hero">' +
+    '<div class="hero-main">' +
+      '<div class="eyebrow">KEYPOINT NOTIFY</div>' +
+      '<h1>把活交给另一个<br>会话或另一个人</h1>' +
+      '<p class="lede">任务拆成<b>分段</b>（背景/目标/验收…）和并行的<b>工作面</b>，' +
+        '每个工作面指派给一个<b>角色</b>。承接方一条命令拿到自包含的开工包，' +
+        '干完自动唤醒下游。</p>' +
+      '<div class="hero-actions">' +
+        '<button class="btn primary" id="home-copy-prompt">复制 Agent Prompt</button>' +
+        '<button class="btn" id="home-copy-install">复制接入命令</button>' +
+        '<a class="btn" href="/board" data-link>看任务看板 →</a>' +
+      '</div>' +
+      '<div class="hero-meta">' +
+        '<span class="chip">身份 ' + esc(ident) + '</span>' +
+        '<span class="chip role">@' + esc(role) + '</span>' +
+        '<span class="chip ok">' + esc(base.replace(/^https?:\/\//, '')) + '</span>' +
+      '</div>' +
+    '</div>' +
+    '<aside class="hero-side">' +
+      '<div class="side-card">' +
+        '<h3>让一个 agent 开始工作</h3>' +
+        '<ol class="steps">' +
+          '<li><span class="step-n">1</span><div><b>装 skill</b>' +
+            '<div class="faint small">把行为手册装到本机，Claude Code 自己会认</div>' +
+            '<code class="snippet">kp install --from ' + esc(base) + ' --key kp_…</code></div></li>' +
+          '<li><span class="step-n">2</span><div><b>粘一份运行说明</b>' +
+            '<div class="faint small">告诉它规则、订阅方式、循环怎么写</div>' +
+            '<button class="btn tiny" id="home-copy-prompt2">复制 Agent Prompt</button></div></li>' +
+          '<li><span class="step-n">3</span><div><b>让它等活</b>' +
+            '<div class="faint small">阻塞在服务端，有活立刻回来</div>' +
+            '<code class="snippet">kp next --wait 30 --claim</code></div></li>' +
+        '</ol>' +
+      '</div>' +
+    '</aside>' +
+  '</section>';
+
+  // 三种订阅方式 —— 用户明确要求「让 agent 知道订阅信息模式」
+  html += '<section class="section"><div class="section-head"><span>它怎么知道有活</span>' +
+    '<span class="rule"></span><a class="btn tiny" href="/skill/SKILL.md" target="_blank">SKILL.md</a>' +
+    '<a class="btn tiny" href="/api/v1/llms.txt" target="_blank">llms.txt</a></div>' +
+    '<div class="modes">' +
+      modeCard('长轮询', '默认', 'kp next --wait 30 --claim',
+        '你只管等。服务端挂着连接，有活立刻返回——回来的就是「为什么是你 + 完整开工包」。' +
+        '每次唤醒一个请求，不是每秒一个。', true) +
+      modeCard('SSE 实时流', '要盯全量事件时', 'curl -N "$KP/api/v1/stream?since=N"',
+        '一条长连接推进来所有事件。适合一个进程看多个任务、或要做实时看板。要自己解析帧。', false) +
+      modeCard('Webhook 出口', '推给外部系统', 'kp hook add <url> --secret S',
+        '把事件 POST 到 Slack / n8n / 飞书。带 HMAC 签名，失败重试三次。', false) +
+      modeCard('缓慢轮询', '不能阻塞时', 'kp events --since <游标>',
+        '游标由服务端按身份记着，省略就是接着上次看。频率你自己定。', false) +
+    '</div></section>';
+
+  // 看板摘要
+  const cols = tasks.columns || {};
+  const total = tasks.count || 0;
+  if (total) {
+    html += '<section class="section"><div class="section-head"><span>现在有什么在跑</span>' +
+      '<span class="rule"></span><a class="btn tiny" href="/board" data-link>全部 ' + total + ' 条 →</a></div>' +
+      '<div class="mini-board">';
+    for (const st of COLUMNS) {
+      const items = cols[st] || [];
+      if (!items.length) continue;
+      html += '<div class="mini-col"><div class="mini-head">' + TASK_STATUS[st] +
+        ' <span class="faint">' + items.length + '</span></div>';
+      for (const t of items.slice(0, 3)) {
+        html += '<div class="mini-card" data-goto="/t/' + esc(t.code) + '">' +
+          '<span class="card-code">' + esc(t.code) + '</span> ' + esc(truncate(t.title, 26)) + '</div>';
+      }
+      html += '</div>';
+    }
+    html += '</div></section>';
+  }
+
+  // 完整 prompt（可展开）
+  html += '<section class="section"><div class="section-head"><span>交给模型的完整说明</span>' +
+    '<span class="rule"></span><button class="btn tiny" id="home-toggle-prompt">展开</button></div>' +
+    '<div id="home-prompt-box" hidden><pre class="prompt-preview" id="home-prompt-text"></pre>' +
+    '<div class="row" style="margin-top:8px"><button class="btn tiny primary" id="home-copy-prompt3">复制全文</button>' +
+    '<span class="faint small">' + prompt.length + ' 字符 · 按你的身份 ' + esc(ident) + ' 生成</span></div></div>' +
+  '</section>';
+
+  html += '</div>';
+  setView(html, true);
+
+  const installCmd = 'kp install --from ' + base + ' --key kp_…';
+  const wireCopy = (id, text, label) => {
+    const el = document.getElementById(id);
+    if (el) el.onclick = () => copy(text, label);
+  };
+  wireCopy('home-copy-prompt', prompt, 'Agent Prompt');
+  wireCopy('home-copy-prompt2', prompt, 'Agent Prompt');
+  wireCopy('home-copy-prompt3', prompt, 'Agent Prompt');
+  wireCopy('home-copy-install', installCmd, '接入命令');
+
+  const toggle = document.getElementById('home-toggle-prompt');
+  const box = document.getElementById('home-prompt-box');
+  document.getElementById('home-prompt-text').textContent = prompt;
+  toggle.onclick = () => {
+    box.hidden = !box.hidden;
+    toggle.textContent = box.hidden ? '展开' : '收起';
+  };
+  document.querySelectorAll('.mini-card[data-goto]').forEach(el => {
+    el.onclick = () => { history.pushState({}, '', el.dataset.goto); route(); };
+  });
+}
+
+function truncate(s, n) {
+  const r = [...String(s || '')];
+  return r.length <= n ? r.join('') : r.slice(0, n - 1).join('') + '…';
+}
+
+function modeCard(name, tag, cmd, why, primary) {
+  return '<div class="mode' + (primary ? ' primary' : '') + '">' +
+    '<div class="mode-head"><b>' + esc(name) + '</b>' +
+      (tag ? '<span class="chip' + (primary ? ' ok' : '') + '">' + esc(tag) + '</span>' : '') + '</div>' +
+    '<code class="snippet">' + esc(cmd) + '</code>' +
+    '<p class="faint small">' + esc(why) + '</p>' +
+  '</div>';
+}
 
 // ----------------------------------------------------------------- board
 async function renderBoard(settled) {

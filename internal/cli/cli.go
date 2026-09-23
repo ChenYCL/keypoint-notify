@@ -74,6 +74,8 @@ func Run(args []string) int {
 		return cmdConfig(rest)
 	case "docs":
 		return cmdDocs(rest, g)
+	case "install":
+		return cmdInstall(rest, g)
 	}
 
 	a, code := newApp(g)
@@ -359,6 +361,7 @@ func printTopHelp() {
   kp events --follow        事件流
   kp config get server      看/改本地配置
   kp docs                   打印 /api/v1/llms.txt（完整 API 说明）
+  kp install                装 skill 到 ~/.claude/skills（从服务端拉）
 
 全局参数:
   --json                    机器可读输出

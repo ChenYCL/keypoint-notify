@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -374,4 +375,129 @@ func maskKey(k string) string {
 		return k
 	}
 	return k[:10] + "…"
+}
+
+// ---------------------------------------------------------------------------
+// kp install — 装环境：把 skill 从服务端拉到本地
+// ---------------------------------------------------------------------------
+
+// cmdInstall pulls the agent skill from a running server and installs it where
+// Claude Code will find it.
+//
+// The skill also ships inside the binary, and `kp skill install` uses that copy
+// — but a session on another machine that only has a key and a URL needs the
+// networked path: connect, pull, install, and be told what to do next.
+func cmdInstall(args []string, g globalOpts) int {
+	fs := flag.NewFlagSet("kp install", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	dir := fs.String("dir", "", "装到哪（默认 ~/.claude/skills/keypoint-notify；- 表示打印到 stdout）")
+	from := fs.String("from", "", "从哪个服务端拉（默认用本地配置里的）")
+	key := fs.String("key", "", "API key（首次接入时配合 --from 使用）")
+	only := fs.Bool("only-skill", false, "只装 skill，不检查接入")
+	fs.Usage = func() {
+		fmt.Print(`kp install — 装环境
+
+  kp install                             用本地配置连服务端，装 skill
+  kp install --from URL --key kp_xxx     首次接入：连上去 + 装 skill
+  kp install --dir -                     只打印 skill 内容，不落盘
+  kp install --only-skill                跳过接入检查
+
+装完的 skill 会被 Claude Code 自动识别：之后说「记个任务」「上报一下」
+「我手上有什么」就会触发。
+
+skill 从**服务端**拉（GET /skill/SKILL.md），所以对方拿到的永远是这个
+服务端当前版本的行为手册，不是随二进制发的旧副本。
+`)
+	}
+	if err := fs.Parse(intersperse(fs, args)); err != nil {
+		return ExitUsage
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "✗", err)
+		return ExitError
+	}
+	if *from != "" {
+		cfg.Server = strings.TrimRight(*from, "/")
+	}
+	if *key != "" {
+		cfg.APIKey = *key
+	}
+	api := client.New(cfg)
+
+	// 1. 先确认能连上、key 有效 —— 装一个连不上的 skill 没有意义
+	var who struct {
+		Identity model.Identity `json:"identity"`
+		Role     string         `json:"role"`
+	}
+	if !*only {
+		if err := api.Get("/api/v1/whoami", &who); err != nil {
+			var ce *client.ConnectionError
+			if errors.As(err, &ce) {
+				fmt.Fprintf(os.Stderr, "✗ %s\n  → %s\n", ce.Error(), ce.Hint())
+				return ExitServer
+			}
+			return (&app{cl: api, cfg: cfg}).fail(err)
+		}
+		fmt.Printf("✓ 已接入 %s（@%s）@ %s\n", who.Identity.Name, who.Role, cfg.Server)
+	}
+
+	// 2. 把整个 skill 目录拉下来
+	files := []string{"SKILL.md", "reference/commands.md", "reference/api.md", "reference/recipes.md"}
+	contents := map[string]string{}
+	for _, f := range files {
+		body, err := api.GetText("/skill/" + f)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "✗ 拉取 /skill/%s 失败：%v\n", f, err)
+			fmt.Fprintln(os.Stderr, "  → 服务端可能太旧，没有 /skill 端点。升级服务端，或用 `kp skill install` 装内置副本")
+			return ExitError
+		}
+		contents[f] = body
+	}
+
+	if *dir == "-" {
+		fmt.Print(contents["SKILL.md"])
+		return ExitOK
+	}
+
+	target := *dir
+	if target == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "✗ 找不到家目录:", err)
+			return ExitError
+		}
+		target = filepath.Join(home, ".claude", "skills", "keypoint-notify")
+	}
+	if err := os.RemoveAll(target); err != nil && !os.IsNotExist(err) {
+		fmt.Fprintln(os.Stderr, "✗ 清不掉旧目录:", err)
+		return ExitError
+	}
+	for f, body := range contents {
+		path := filepath.Join(target, f)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			fmt.Fprintln(os.Stderr, "✗", err)
+			return ExitError
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			fmt.Fprintln(os.Stderr, "✗ 写 "+f+" 失败:", err)
+			return ExitError
+		}
+	}
+	fmt.Printf("✓ skill 已装到 %s（%d 个文件，来自 %s）\n", target, len(contents), cfg.Server)
+
+	// 3. 把接入信息写进配置，顺带告诉对方下一步
+	if err := cfg.Save(); err != nil {
+		fmt.Fprintln(os.Stderr, "✗ 写配置失败:", err)
+		return ExitError
+	}
+	fmt.Printf("✓ 配置已写入 %s\n\n", config.Path())
+	fmt.Println("现在可以：")
+	fmt.Println("  在 Claude Code 里说「我手上有什么」「记个任务」「上报一下」")
+	fmt.Println("  或直接在终端：")
+	fmt.Println("    kp next --wait 30 --claim     阻塞等活（有活就返回完整开工包）")
+	fmt.Println("    kp loop                       一直等活，拿到就打印")
+	fmt.Println("    kp loop --run 'claude -p \"$KP_PACK\"'   自动喂给一个新会话")
+	return ExitOK
 }
