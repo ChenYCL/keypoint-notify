@@ -431,6 +431,49 @@ async function renderHome() {
         '游标由服务端按身份记着，省略就是接着上次看。频率你自己定。', false) +
     '</div></section>';
 
+  // SOP：给人看的操作顺序。agent 读 SKILL.md，人读这里。
+  html += '<section class="section"><div class="section-head"><span>一个任务的标准流程</span>' +
+    '<span class="rule"></span>' +
+    '<button class="btn tiny" id="home-toggle-sop">展开命令</button></div>' +
+    '<div class="sop" id="sop-steps">' +
+      sopStep('1', '建任务', '把你会话里的上下文变成结构化任务',
+        ['kp task new --title "…" --goal "…" --acceptance "…"',
+         '# 或整份 JSON：kp task new --from-json - <<EOF'], true) +
+      sopStep('2', '拆工作面', '按角色切成 2-4 片，写明依赖',
+        ['kp task side add KP-12 api  --role backend',
+         'kp task side add KP-12 ui   --role frontend --deps api',
+         'kp task side add KP-12 rev  --role review   --deps ui']) +
+      sopStep('3', '派人', '指派给**角色**（不是某个人）；先确认这角色有人持有',
+        ['kp role ls --holders',
+         'kp task side assign KP-12 ui --role frontend']) +
+      sopStep('4', '等它自己走', '承接方用 kp next 拿包开工；交棒是副作用，不用你催',
+        ['kp task pack KP-12 --side ui   # 你要看就自己拉一份',
+         'kp board                        # 或看有没有卡住的'], true) +
+      sopStep('5', '盯与例外处理', '只有两种时候需要你介入：卡住、或者要改口径',
+        ['kp inbox --unread               # 有人 @ 我',
+         'kp task list --status blocked   # 谁卡住了',
+         'kp report KP-12 --type decision -m "口径改成…" --mention @ui']) +
+      sopStep('6', '收尾', '最后一个面完成时任务自动 done —— **别手动关**',
+        ['# 什么都不用做。想确认：kp task list --status done'], true) +
+    '</div>' +
+    '<div class="best-practice">' +
+      '<b>经验</b>' +
+      '<ul>' +
+        '<li><b>goal 和 acceptance 是底线。</b>没有验收标准的任务，承接方只能猜，' +
+          '最后交付的东西一定不是你要的。不确定的写「（待确认：…）」，别编。</li>' +
+        '<li><b>别为了好看拆面。</b>2-4 片是常态；超过 5 片通常说明这是三个任务。</li>' +
+        '<li><b>指派前先查 <code>kp role ls --holders</code>。</b>没人持有的角色等于没人收到通知。</li>' +
+        '<li><b>一个面一个负责人。</b>要动别人的面先发 <code>handoff</code> 或 <code>question</code>，' +
+          '不要顺手改。</li>' +
+        '<li><b>阻塞要说清「需要什么」</b>，并 <code>--mention</code> 到能解决的人，' +
+          '而不是写一句「我很难」。</li>' +
+        '<li><b>干完必上报，不静默结束。</b>别人在等你的信号。</li>' +
+        '<li><b>同时开多个同角色会话时用 <code>--claim</code>。</b>' +
+          '不认领就开干，两个人会做同一件事。</li>' +
+      '</ul>' +
+    '</div>' +
+  '</section>';
+
   // 看板摘要
   const cols = tasks.columns || {};
   const total = tasks.count || 0;
@@ -473,6 +516,12 @@ async function renderHome() {
   wireCopy('home-copy-prompt3', prompt, 'Agent Prompt');
   wireCopy('home-copy-install', installCmd, '接入命令');
 
+  const sopToggle = document.getElementById('home-toggle-sop');
+  if (sopToggle) sopToggle.onclick = () => {
+    const open = document.getElementById('sop-steps').classList.toggle('show-cmds');
+    sopToggle.textContent = open ? '收起命令' : '展开命令';
+  };
+
   const toggle = document.getElementById('home-toggle-prompt');
   const box = document.getElementById('home-prompt-box');
   document.getElementById('home-prompt-text').textContent = prompt;
@@ -488,6 +537,25 @@ async function renderHome() {
 function truncate(s, n) {
   const r = [...String(s || '')];
   return r.length <= n ? r.join('') : r.slice(0, n - 1).join('') + '…';
+}
+
+// Inline markdown only — these strings are one-liners, so block-level
+// constructs would produce stray <p> wrappers.
+function mdInline(s) {
+  return esc(s)
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+}
+
+function sopStep(n, title, why, cmds, important) {
+  return '<div class="sop-step' + (important ? ' key' : '') + '">' +
+    '<span class="step-n">' + n + '</span>' +
+    '<div class="sop-body"><b>' + title + '</b>' +
+      '<div class="faint small">' + mdInline(why) + '</div>' +
+      '<div class="sop-cmds" hidden>' +
+        cmds.map(c => '<code class="snippet">' + esc(c) + '</code>').join('') +
+      '</div>' +
+    '</div></div>';
 }
 
 function modeCard(name, tag, cmd, why, primary) {

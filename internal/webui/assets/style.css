@@ -606,3 +606,33 @@ body.scrolled .topbar::after { opacity: 1; }
   border-radius: var(--radius); padding: 14px;
   font-size: 12px; line-height: 1.65; white-space: pre-wrap; word-break: break-word;
 }
+
+
+/* -------------------------------------------------------------------- sop */
+
+.sop { display: grid; gap: 2px; }
+.sop-step {
+  display: flex; gap: 12px; padding: 12px 14px;
+  background: var(--bg-raised); border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+}
+.sop-step.key { border-left: 2px solid var(--accent-dim); }
+.sop-body { flex: 1; min-width: 0; }
+.sop-body b { font-size: 13.5px; }
+.sop-cmds { margin-top: 8px; display: grid; gap: 5px; }
+.sop.show-cmds .sop-cmds { display: grid !important; }
+
+.best-practice {
+  margin-top: 16px; padding: 14px 16px;
+  background: var(--bg-sunken); border: 1px dashed var(--line);
+  border-radius: var(--radius);
+}
+.best-practice > b { font-size: 13px; color: var(--fg-muted);
+  text-transform: uppercase; letter-spacing: .5px; }
+.best-practice ul { margin: 10px 0 0; padding-left: 18px; }
+.best-practice li { margin: 7px 0; font-size: 13px; line-height: 1.65; color: var(--fg-muted); }
+.best-practice li b { color: var(--fg); }
+.best-practice code {
+  background: var(--bg-raised); padding: 1px 5px; border-radius: 4px;
+  color: var(--warn); font-size: 12px;
+}
