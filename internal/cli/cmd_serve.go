@@ -71,6 +71,16 @@ func cmdServe(args []string) int {
 	httpapi.SetSkillReader(func(path string) ([]byte, error) {
 		return iofs.ReadFile(skillFS, path)
 	})
+	// Serve our own binary so a fresh machine can bootstrap with just curl —
+	// resolve the real path rather than trusting os.Args[0], which may be a
+	// relative name or a symlink.
+	httpapi.SetBinaryProvider(func() (string, error) {
+		exe, err := os.Executable()
+		if err != nil {
+			return "", err
+		}
+		return filepath.EvalSymlinks(exe)
+	})
 	api := httpapi.New(st, Version, webFS)
 	srv := &http.Server{
 		Addr:              *addr,

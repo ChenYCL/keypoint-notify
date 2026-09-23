@@ -34,6 +34,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/session", s.handleSession)
 	mux.HandleFunc("DELETE /api/v1/session", s.handleSessionDelete)
 	mux.HandleFunc("GET /api/v1/llms.txt", s.handleLLMsTxt)
+	mux.HandleFunc("GET /install.sh", s.handleInstallScript)
+	mux.HandleFunc("GET /kp", s.handleBinary)
 	mux.HandleFunc("GET /api/v1/skill", s.handleSkill)
 	mux.HandleFunc("GET /skill", s.handleSkill)
 	mux.HandleFunc("GET /skill/{path...}", s.handleSkill)

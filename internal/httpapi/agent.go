@@ -105,6 +105,9 @@ func agentPrompt(in promptInput) string {
 	} else {
 		b.WriteString("你已经接入了。确认一下：\n\n```bash\nkp whoami\n```\n\n")
 	}
+	b.WriteString("如果连 kp 都还没装（全新机器）：\n\n```bash\n" +
+		"curl -fsSL \"" + in.Base + "/install.sh?key=<你的key>\" | sh\n```\n\n" +
+		"这条会把二进制、配置、skill 一次装好，认得出 Claude Code / Codex / Gemini / opencode / Kimi。\n\n")
 
 	// --- 你是谁 -------------------------------------------------------
 	b.WriteString("## 1. 你是谁\n\n")
@@ -284,3 +287,93 @@ func readSkill(path string) ([]byte, error) {
 	}
 	return skillReader(path)
 }
+
+// ---------------------------------------------------------------------------
+// GET /install.sh  ·  GET /kp   — 让一台什么都没有的机器能起来
+// ---------------------------------------------------------------------------
+
+// handleInstallScript serves a one-liner bootstrap.
+//
+// The chicken-and-egg problem: `kp install` is the friendly path, but a fresh
+// machine has no `kp`. Fetching this script with curl is the one step that
+// needs nothing pre-installed.
+//
+// It is deliberately not clever: download one binary, chmod it, run `kp
+// install`. No piping a tarball into a shell, no repository cloning.
+func (s *Server) handleInstallScript(w http.ResponseWriter, r *http.Request) {
+	base := s.baseFor(r)
+	key := strings.TrimSpace(r.URL.Query().Get("key"))
+	target := strings.TrimSpace(r.URL.Query().Get("target"))
+
+	body := "#!/bin/sh\n" +
+		"# Keypoint 客户端安装脚本 —— 由 " + base + " 生成\n" +
+		"#\n" +
+		"#   curl -fsSL \"" + base + "/install.sh\" | sh\n" +
+		"#   curl -fsSL \"" + base + "/install.sh?key=kp_xxx&target=claude\" | sh\n" +
+		"#\n" +
+		"set -eu\n\n" +
+		"BASE=\"" + base + "\"\n" +
+		"KEY=\"" + key + "\"\n" +
+		"TARGET=\"" + target + "\"\n\n" +
+		"# 装到哪：优先 ~/.local/bin，回落到 /usr/local/bin（可能要 sudo）\n" +
+		"BIN=\"$HOME/.local/bin\"\n" +
+		"mkdir -p \"$BIN\"\n\n" +
+		"echo \"→ 下载 kp ...\"\n" +
+		"arch=$(uname -m)\n" +
+		"os=$(uname -s | tr 'A-Z' 'a-z')\n" +
+		"case \"$os-$arch\" in\n" +
+		"  darwin-arm64|darwin-x86_64|linux-x86_64|linux-aarch64) ;;\n" +
+		"  *) echo \"✗ 这个平台还没有预编译产物（$os-$arch）。请自己编译：\" >&2\n" +
+		"     echo \"    git clone <repo> && cd keypoint-notify && make build\" >&2; exit 1 ;;\n" +
+		"esac\n" +
+		"curl -fsSL \"$BASE/kp\" -o \"$BIN/kp\"\n" +
+		"chmod +x \"$BIN/kp\"\n" +
+		"echo \"✓ kp 已装到 $BIN/kp\"\n\n" +
+		"case \":$PATH:\" in *\":$BIN:\"*) ;;\n" +
+		"  *) echo \"\"; echo \"⚠ $BIN 不在 PATH 里，加一行：\";\n" +
+		"     echo \"    export PATH=\\\"$BIN:\\$PATH\\\"\" ;;\n" +
+		"esac\n\n" +
+		"if [ -n \"$KEY\" ]; then\n" +
+		"  echo \"→ 接入并安装 skill ...\"\n" +
+		"  if [ -n \"$TARGET\" ]; then\n" +
+		"    \"$BIN/kp\" install --from \"$BASE\" --key \"$KEY\" --target \"$TARGET\"\n" +
+		"  else\n" +
+		"    \"$BIN/kp\" install --from \"$BASE\" --key \"$KEY\"\n" +
+		"  fi\n" +
+		"else\n" +
+		"  echo \"\"; echo \"下一步：\"\n" +
+		"  echo \"  kp install --from $BASE --key <管理员给你的 key>\"\n" +
+		"  echo \"或直接等活（已经有 ~/.keypoint/config.json 的话）：\"\n" +
+		"  echo \"  kp next --wait 30 --claim\"\n" +
+		"fi\n"
+
+	writeText(w, http.StatusOK, "text/x-shellscript", body)
+}
+
+// handleBinary serves the running binary so a new machine can bootstrap itself
+// without the repo, a release page, or a package manager.
+//
+// Same trust level as the server itself: anyone who can reach this endpoint can
+// already read every task in it.
+func (s *Server) handleBinary(w http.ResponseWriter, r *http.Request) {
+	if binarySelf == nil {
+		writeText(w, http.StatusNotFound, "text/plain",
+			"this build does not expose its own binary\n")
+		return
+	}
+	path, err := binarySelf()
+	if err != nil {
+		writeText(w, http.StatusNotFound, "text/plain", "binary not available: "+err.Error()+"\n")
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", `attachment; filename="kp"`)
+	http.ServeFile(w, r, path)
+}
+
+// binarySelf is injected at startup: the HTTP layer asks for the path of the
+// binary serving the request, rather than guessing at os.Args[0].
+var binarySelf func() (string, error)
+
+// SetBinaryProvider wires the self-binary source in at startup.
+func SetBinaryProvider(fn func() (string, error)) { binarySelf = fn }

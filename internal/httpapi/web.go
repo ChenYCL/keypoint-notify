@@ -102,5 +102,6 @@ func contentTypeFor(path string) string {
 // an agent deciding whether an endpoint exists.
 func isMachinePath(path string) bool {
 	return strings.HasPrefix(path, "api/") || strings.HasPrefix(path, "skill/") ||
-		path == "api" || path == "skill"
+		path == "api" || path == "skill" ||
+		path == "kp" || path == "install.sh"
 }

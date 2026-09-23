@@ -118,11 +118,56 @@ curl -H "Authorization: Bearer $KP_KEY" $KP/api/v1/llms.txt
 
 ## 安装
 
+### 一台什么都没有的新机器
+
+```bash
+curl -fsSL "http://<服务端>/install.sh?key=kp_xxx" | sh
+```
+
+`install.sh` 由服务端自己生成，做三件事：下载对应平台的 `kp`、
+`chmod +x`、用这个 key 接入并把 skill 装到本机认识的 CLI 里。不需要
+仓库、不需要包管理器、不需要 Go。
+
+不带 `key` 就只装二进制：
+
+```bash
+curl -fsSL "http://<服务端>/install.sh" | sh
+```
+
+### 已经装了 kp 的机器
+
+```bash
+kp install                                 自动探测本机有哪些 CLI，各装一份
+kp install --target claude                 只给 Claude Code
+kp install --target codex,gemini           给多个
+kp install --target agents                 装成当前目录的 AGENTS.md（跟仓库走）
+kp install --from URL --key kp_xxx         首次接入
+```
+
+**各家 CLI 的约定不一样，装的位置也不同**：
+
+| CLI | 装到哪 | 形式 |
+|---|---|---|
+| Claude Code | `~/.claude/skills/keypoint-notify/` | 技能目录（SKILL.md + reference/，带 frontmatter） |
+| Codex CLI | `~/.codex/AGENTS.md` | 追加一节，`<!-- keypoint:start -->` 包裹 |
+| Gemini CLI | `~/.gemini/GEMINI.md` | 同上 |
+| opencode | `~/.config/opencode/AGENTS.md` | 同上 |
+| Kimi Code | `~/.kimi/AGENTS.md` | 同上 |
+| 任意 | `./AGENTS.md` | 同上，跟仓库走 |
+
+`auto`（默认）只装到**确实存在配置目录**的 CLI 上；一个都没探测到会明确
+报错并给出选项，而不是默默什么都不做。重装会替换标记内的那一节，不会
+把文件叠两份，也不会动你自己写的内容。
+
+skill 内容从**服务端**拉，所以对方拿到的永远是这个服务端当前版本的
+行为手册，不是随二进制发的旧副本。
+
+### 从源码
+
 ```bash
 make build          # → ./kp（CGO_ENABLED=0，真单二进制）
 make install        # → ~/.local/bin/kp
-make skill          # → ~/.claude/skills/keypoint-notify
-```
+make skill          # → ~/.claude/skills/（开发用，软链）
 
 需要 Go 1.25+（下限由 `modernc.org/sqlite` 决定，不是本项目的代码）。
 

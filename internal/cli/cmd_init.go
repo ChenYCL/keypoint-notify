@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -390,23 +391,35 @@ func maskKey(k string) string {
 func cmdInstall(args []string, g globalOpts) int {
 	fs := flag.NewFlagSet("kp install", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	dir := fs.String("dir", "", "装到哪（默认 ~/.claude/skills/keypoint-notify；- 表示打印到 stdout）")
+	dir := fs.String("dir", "", "装到哪；- 表示打印到 stdout（默认按 --target 自动选）")
+	target := fs.String("target", "auto", "给哪个 CLI 装：auto|claude|codex|gemini|opencode|kimi|agents|all")
 	from := fs.String("from", "", "从哪个服务端拉（默认用本地配置里的）")
 	key := fs.String("key", "", "API key（首次接入时配合 --from 使用）")
 	only := fs.Bool("only-skill", false, "只装 skill，不检查接入")
 	fs.Usage = func() {
 		fmt.Print(`kp install — 装环境
 
-  kp install                             用本地配置连服务端，装 skill
-  kp install --from URL --key kp_xxx     首次接入：连上去 + 装 skill
-  kp install --dir -                     只打印 skill 内容，不落盘
-  kp install --only-skill                跳过接入检查
+  kp install                             自动探测本机装了哪些 CLI，各装一份
+  kp install --target claude             只给 Claude Code 装
+  kp install --target codex,gemini       给多个装
+  kp install --target agents             装成项目里的 AGENTS.md（任何 CLI 都读）
+  kp install --from URL --key kp_xxx     首次接入：连上去 + 装
+  kp install --dir -                     只打印，不落盘
 
-装完的 skill 会被 Claude Code 自动识别：之后说「记个任务」「上报一下」
-「我手上有什么」就会触发。
+各 CLI 的约定不一样，装的位置也不同：
 
-skill 从**服务端**拉（GET /skill/SKILL.md），所以对方拿到的永远是这个
-服务端当前版本的行为手册，不是随二进制发的旧副本。
+  claude    ~/.claude/skills/keypoint-notify/SKILL.md   带 frontmatter 的技能目录
+  codex     ~/.codex/AGENTS.md                          追加一节
+  gemini    ~/.gemini/GEMINI.md                         追加一节
+  opencode  ~/.config/opencode/AGENTS.md                追加一节
+  kimi      ~/.kimi/AGENTS.md                           追加一节
+  agents    ./AGENTS.md（当前目录，跟仓库走）            追加一节
+
+auto（默认）会探测哪些目录存在，存在就装。没探测到就提示你用
+--target 指定，而不是默默什么都不做。
+
+skill 内容从**服务端**拉（GET /skill/SKILL.md），所以对方拿到的永远是
+这个服务端当前版本的行为手册，不是随二进制发的旧副本。
 `)
 	}
 	if err := fs.Parse(intersperse(fs, args)); err != nil {
@@ -461,31 +474,34 @@ skill 从**服务端**拉（GET /skill/SKILL.md），所以对方拿到的永远
 		return ExitOK
 	}
 
-	target := *dir
-	if target == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "✗ 找不到家目录:", err)
-			return ExitError
-		}
-		target = filepath.Join(home, ".claude", "skills", "keypoint-notify")
-	}
-	if err := os.RemoveAll(target); err != nil && !os.IsNotExist(err) {
-		fmt.Fprintln(os.Stderr, "✗ 清不掉旧目录:", err)
-		return ExitError
-	}
-	for f, body := range contents {
-		path := filepath.Join(target, f)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	// 显式 --dir 优先，其次 --target，否则自动探测
+	if *dir != "" {
+		if err := writeSkillDir(*dir, contents); err != nil {
 			fmt.Fprintln(os.Stderr, "✗", err)
 			return ExitError
 		}
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			fmt.Fprintln(os.Stderr, "✗ 写 "+f+" 失败:", err)
+		fmt.Printf("✓ skill 已装到 %s（%d 个文件，来自 %s）\n", *dir, len(contents), cfg.Server)
+	} else {
+		installed, skipped, err := installForTargets(*target, contents, cfg.Server)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "✗", err)
 			return ExitError
 		}
+		if len(installed) == 0 {
+			fmt.Fprintln(os.Stderr, "✗ 没有装到任何地方。")
+			fmt.Fprintln(os.Stderr, "  本机没探测到已知 CLI 的配置目录。指定一个：")
+			fmt.Fprintln(os.Stderr, "    kp install --target claude      ~/.claude/skills/")
+			fmt.Fprintln(os.Stderr, "    kp install --target agents      当前目录的 AGENTS.md（任何 CLI 都读）")
+			fmt.Fprintln(os.Stderr, "    kp install --dir <路径>          装到任意位置")
+			return ExitError
+		}
+		for _, line := range installed {
+			fmt.Println("✓ " + line)
+		}
+		for _, line := range skipped {
+			fmt.Println("· " + line)
+		}
 	}
-	fmt.Printf("✓ skill 已装到 %s（%d 个文件，来自 %s）\n", target, len(contents), cfg.Server)
 
 	// 3. 把接入信息写进配置，顺带告诉对方下一步
 	if err := cfg.Save(); err != nil {
@@ -500,4 +516,155 @@ skill 从**服务端**拉（GET /skill/SKILL.md），所以对方拿到的永远
 	fmt.Println("    kp loop                       一直等活，拿到就打印")
 	fmt.Println("    kp loop --run 'claude -p \"$KP_PACK\"'   自动喂给一个新会话")
 	return ExitOK
+}
+
+// ---------------------------------------------------------------------------
+// 各家 CLI 的指令文件约定
+// ---------------------------------------------------------------------------
+
+// skillTargets maps a CLI name to where it expects to find standing
+// instructions. Only Claude Code has a real skill format (a directory with
+// frontmatter); everyone else reads a single markdown file, so for them the
+// skill body is appended into a delimited section that can be replaced on
+// re-install without touching the rest of the file.
+var skillTargets = map[string]struct {
+	Path  string // "" means relative to cwd
+	Label string
+}{
+	"claude":   {"", "Claude Code（~/.claude/skills/keypoint-notify/）"},
+	"codex":    {"~/.codex/AGENTS.md", "Codex CLI（~/.codex/AGENTS.md）"},
+	"gemini":   {"~/.gemini/GEMINI.md", "Gemini CLI（~/.gemini/GEMINI.md）"},
+	"opencode": {"~/.config/opencode/AGENTS.md", "opencode（~/.config/opencode/AGENTS.md）"},
+	"kimi":     {"~/.kimi/AGENTS.md", "Kimi Code（~/.kimi/AGENTS.md）"},
+	"agents":   {"AGENTS.md", "当前目录 AGENTS.md（跟仓库走，任何 CLI 都读）"},
+}
+
+// sectionMarkers delimit the injected block so a re-install replaces it instead
+// of stacking a second copy — users keep their own content in these files.
+const (
+	sectionStart = "<!-- keypoint:start -->"
+	sectionEnd   = "<!-- keypoint:end -->"
+)
+
+// detectTargets returns the target names whose config directory already exists,
+// which is the honest signal that the CLI is installed on this machine. Claude
+// Code is a special case: its skills directory is created on first use, so the
+// presence of ~/.claude is what we look for.
+func detectTargets(home string) []string {
+	probes := map[string]string{
+		"claude":   filepath.Join(home, ".claude"),
+		"codex":    filepath.Join(home, ".codex"),
+		"gemini":   filepath.Join(home, ".gemini"),
+		"opencode": filepath.Join(home, ".config", "opencode"),
+		"kimi":     filepath.Join(home, ".kimi"),
+	}
+	out := []string{}
+	for _, name := range []string{"claude", "codex", "gemini", "opencode", "kimi"} {
+		if st, err := os.Stat(probes[name]); err == nil && st.IsDir() {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// installForTargets installs the skill for each requested CLI.
+func installForTargets(spec string, contents map[string]string, server string) (installed, skipped []string, err error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, nil, fmt.Errorf("找不到家目录: %w", err)
+	}
+
+	var names []string
+	switch spec {
+	case "", "auto":
+		names = detectTargets(home)
+		if len(names) == 0 {
+			return nil, nil, nil
+		}
+	case "all":
+		for n := range skillTargets {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+	default:
+		for _, part := range strings.Split(spec, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			if _, ok := skillTargets[part]; !ok {
+				return nil, nil, fmt.Errorf("未知 target %q（可选：claude codex gemini opencode kimi agents）", part)
+			}
+			names = append(names, part)
+		}
+	}
+
+	for _, name := range names {
+		t := skillTargets[name]
+		if name == "claude" {
+			dir := filepath.Join(home, ".claude", "skills", "keypoint-notify")
+			if err := writeSkillDir(dir, contents); err != nil {
+				return installed, skipped, err
+			}
+			installed = append(installed, t.Label)
+			continue
+		}
+		path := t.Path
+		if strings.HasPrefix(path, "~/") {
+			path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
+		}
+		if err := writeSection(path, contents["SKILL.md"], server); err != nil {
+			return installed, skipped, err
+		}
+		installed = append(installed, t.Label)
+	}
+	return installed, skipped, nil
+}
+
+// writeSkillDir writes the full skill tree, replacing any previous install.
+func writeSkillDir(dir string, contents map[string]string) error {
+	if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("清不掉旧目录: %w", err)
+	}
+	for f, body := range contents {
+		path := filepath.Join(dir, f)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			return fmt.Errorf("写 %s 失败: %w", f, err)
+		}
+	}
+	return nil
+}
+
+// writeSection injects the skill into a single-file convention (AGENTS.md and
+// friends), replacing the previous block if one is there and leaving everything
+// else in the file untouched.
+func writeSection(path, body, server string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	text := string(existing)
+
+	block := sectionStart + "\n" +
+		"<!-- 由 `kp install` 生成，来自 " + server + "；重新安装会替换本节，手工改动会丢 -->\n\n" +
+		body + "\n" + sectionEnd
+
+	if i := strings.Index(text, sectionStart); i >= 0 {
+		if j := strings.Index(text[i:], sectionEnd); j >= 0 {
+			text = text[:i] + block + text[i+j+len(sectionEnd):]
+		} else {
+			text = text[:i] + block
+		}
+	} else if strings.TrimSpace(text) == "" {
+		text = block + "\n"
+	} else {
+		text = strings.TrimRight(text, "\n") + "\n\n" + block + "\n"
+	}
+	return os.WriteFile(path, []byte(text), 0o644)
 }
