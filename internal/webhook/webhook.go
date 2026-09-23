@@ -20,8 +20,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/light/keypoint-notify/internal/model"
-	"github.com/light/keypoint-notify/internal/store"
+	"github.com/ChenYCL/keypoint-notify/internal/model"
+	"github.com/ChenYCL/keypoint-notify/internal/store"
 )
 
 // Dispatcher polls the event log and POSTs matching events to subscribers.

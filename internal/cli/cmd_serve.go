@@ -17,9 +17,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/light/keypoint-notify/internal/httpapi"
-	"github.com/light/keypoint-notify/internal/store"
-	"github.com/light/keypoint-notify/internal/webhook"
+	"github.com/ChenYCL/keypoint-notify/internal/httpapi"
+	"github.com/ChenYCL/keypoint-notify/internal/store"
+	"github.com/ChenYCL/keypoint-notify/internal/webhook"
 )
 
 // cmdServe runs the hub: HTTP API, embedded board, event fan-out.

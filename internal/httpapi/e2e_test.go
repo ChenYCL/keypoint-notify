@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/light/keypoint-notify/internal/httpapi"
-	"github.com/light/keypoint-notify/internal/store"
+	"github.com/ChenYCL/keypoint-notify/internal/httpapi"
+	"github.com/ChenYCL/keypoint-notify/internal/store"
 )
 
 // harness is a running server plus the key used to talk to it.

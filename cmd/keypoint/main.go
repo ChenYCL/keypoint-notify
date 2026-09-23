@@ -5,7 +5,7 @@ package main
 import (
 	"os"
 
-	"github.com/light/keypoint-notify/internal/cli"
+	"github.com/ChenYCL/keypoint-notify/internal/cli"
 )
 
 func main() {

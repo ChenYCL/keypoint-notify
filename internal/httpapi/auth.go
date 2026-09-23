@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/light/keypoint-notify/internal/model"
+	"github.com/ChenYCL/keypoint-notify/internal/model"
 )
 
 // Verbosef writes a diagnostic line when KEYPOINT_VERBOSE is set. The server

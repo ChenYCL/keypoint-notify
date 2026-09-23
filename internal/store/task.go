@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/light/keypoint-notify/internal/model"
+	"github.com/ChenYCL/keypoint-notify/internal/model"
 )
 
 const taskCols = `id, seq, code, title, kind, priority, status, summary,

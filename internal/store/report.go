@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/light/keypoint-notify/internal/model"
+	"github.com/ChenYCL/keypoint-notify/internal/model"
 )
 
 const reportCols = `id, task_id, side_id, identity_id, role, type, priority, body, segments, mentions, created_at, edited_at`

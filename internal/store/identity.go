@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/light/keypoint-notify/internal/model"
+	"github.com/ChenYCL/keypoint-notify/internal/model"
 )
 
 // KeyPrefix is the literal prefix of every API key this system issues.

@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/light/keypoint-notify/internal/model"
-	"github.com/light/keypoint-notify/internal/store"
+	"github.com/ChenYCL/keypoint-notify/internal/model"
+	"github.com/ChenYCL/keypoint-notify/internal/store"
 )
 
 // ---------------------------------------------------------------------------

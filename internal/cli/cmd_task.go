@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/light/keypoint-notify/internal/client"
-	"github.com/light/keypoint-notify/internal/model"
+	"github.com/ChenYCL/keypoint-notify/internal/client"
+	"github.com/ChenYCL/keypoint-notify/internal/model"
 )
 
 // ---------------------------------------------------------------------------

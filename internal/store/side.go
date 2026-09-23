@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/light/keypoint-notify/internal/model"
+	"github.com/ChenYCL/keypoint-notify/internal/model"
 )
 
 const sideCols = `id, task_id, key, title, assignee_role, assignee_identity, status, deps,

@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/light/keypoint-notify/internal/client"
-	"github.com/light/keypoint-notify/internal/config"
-	"github.com/light/keypoint-notify/internal/model"
+	"github.com/ChenYCL/keypoint-notify/internal/client"
+	"github.com/ChenYCL/keypoint-notify/internal/config"
+	"github.com/ChenYCL/keypoint-notify/internal/model"
 )
 
 // cmdInit connects this machine to a server and stores the resulting identity

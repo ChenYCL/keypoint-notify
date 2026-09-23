@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/light/keypoint-notify/internal/model"
+	"github.com/ChenYCL/keypoint-notify/internal/model"
 )
 
 // NextWork is one answer to "what should I do now".

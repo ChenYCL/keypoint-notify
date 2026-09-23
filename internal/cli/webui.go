@@ -3,8 +3,8 @@ package cli
 import (
 	"io/fs"
 
-	skillpkg "github.com/light/keypoint-notify/internal/skill"
-	"github.com/light/keypoint-notify/internal/webui"
+	skillpkg "github.com/ChenYCL/keypoint-notify/internal/skill"
+	"github.com/ChenYCL/keypoint-notify/internal/webui"
 )
 
 // webFS is the UI bundle handed to the HTTP server.

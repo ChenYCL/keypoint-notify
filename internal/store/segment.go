@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/light/keypoint-notify/internal/model"
+	"github.com/ChenYCL/keypoint-notify/internal/model"
 )
 
 const segmentCols = `id, task_id, side_id, key, title, body, kind, format, ord, updated_by, created_at, updated_at`

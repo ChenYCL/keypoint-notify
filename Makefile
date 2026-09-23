@@ -2,7 +2,7 @@ BINARY := kp
 PREFIX ?= $(HOME)/.local
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
-LDFLAGS := -s -w -X github.com/light/keypoint-notify/internal/cli.Version=$(VERSION)
+LDFLAGS := -s -w -X github.com/ChenYCL/keypoint-notify/internal/cli.Version=$(VERSION)
 
 .PHONY: help build install test vet fmt lint run clean skill uninstall
 

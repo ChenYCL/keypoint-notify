@@ -15,7 +15,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/light/keypoint-notify/internal/store"
+	"github.com/ChenYCL/keypoint-notify/internal/store"
 )
 
 // APIError is the single error shape every endpoint returns.

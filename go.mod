@@ -1,4 +1,4 @@
-module github.com/light/keypoint-notify
+module github.com/ChenYCL/keypoint-notify
 
 go 1.25.0
 

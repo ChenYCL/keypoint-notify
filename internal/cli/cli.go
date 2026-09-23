@@ -15,8 +15,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/light/keypoint-notify/internal/client"
-	"github.com/light/keypoint-notify/internal/config"
+	"github.com/ChenYCL/keypoint-notify/internal/client"
+	"github.com/ChenYCL/keypoint-notify/internal/config"
 )
 
 // Exit codes, stable enough for a script to branch on.

@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/light/keypoint-notify/internal/config"
+	"github.com/ChenYCL/keypoint-notify/internal/config"
 )
 
 // Client talks to one server as one identity.

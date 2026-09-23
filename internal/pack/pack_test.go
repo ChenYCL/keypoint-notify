@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/light/keypoint-notify/internal/model"
+	"github.com/ChenYCL/keypoint-notify/internal/model"
 )
 
 func sampleTask() model.Task {

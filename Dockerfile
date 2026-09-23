@@ -14,7 +14,7 @@ RUN go mod download
 COPY . .
 ARG VERSION=docker
 RUN CGO_ENABLED=0 go build -trimpath \
-      -ldflags="-s -w -X github.com/light/keypoint-notify/internal/cli.Version=${VERSION}" \
+      -ldflags="-s -w -X github.com/ChenYCL/keypoint-notify/internal/cli.Version=${VERSION}" \
       -o /out/kp ./cmd/keypoint
 
 FROM alpine:3.20

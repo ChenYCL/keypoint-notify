@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/light/keypoint-notify/internal/model"
+	"github.com/ChenYCL/keypoint-notify/internal/model"
 )
 
 // Event types. These are also the tokens a webhook subscribes to; a webhook

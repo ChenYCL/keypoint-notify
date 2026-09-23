@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/light/keypoint-notify/internal/client"
+	"github.com/ChenYCL/keypoint-notify/internal/client"
 )
 
 // ---------------------------------------------------------------------------
