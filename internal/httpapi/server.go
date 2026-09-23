@@ -34,11 +34,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/session", s.handleSession)
 	mux.HandleFunc("DELETE /api/v1/session", s.handleSessionDelete)
 	mux.HandleFunc("GET /api/v1/llms.txt", s.handleLLMsTxt)
+	mux.HandleFunc("GET /api/v1/skill", s.handleSkill)
+	mux.HandleFunc("GET /skill", s.handleSkill)
+	mux.HandleFunc("GET /skill/{path...}", s.handleSkill)
 	mux.HandleFunc("GET /api/v1/schema", s.handleSchema)
 
 	// --- authenticated ---------------------------------------------------
 	auth := s.requireAuth
 	mux.Handle("GET /api/v1/whoami", auth(http.HandlerFunc(s.handleWhoami)))
+	mux.Handle("GET /api/v1/agent-prompt", auth(http.HandlerFunc(s.handleAgentPrompt)))
+	mux.Handle("POST /api/v1/agent-prompt", auth(http.HandlerFunc(s.handleAgentPrompt)))
 
 	mux.Handle("GET /api/v1/tasks", auth(http.HandlerFunc(s.handleTaskList)))
 	mux.Handle("POST /api/v1/tasks", auth(http.HandlerFunc(s.handleTaskCreate)))

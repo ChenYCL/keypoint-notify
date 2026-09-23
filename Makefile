@@ -31,7 +31,13 @@ check: vet test ## vet + test
 run: build ## 本地起服务（数据在 ./data）
 	./$(BINARY) serve
 
-skill: ## 把 skill 链接到 ~/.claude/skills/keypoint-notify
+sync-skill: ## 把 skills/ 同步到内嵌副本（改完 skill 必跑）
+	@rm -rf internal/skill/assets
+	@mkdir -p internal/skill/assets
+	@cp -r skills/keypoint-notify/. internal/skill/assets/
+	@echo "已同步 skills/keypoint-notify → internal/skill/assets"
+
+skill: sync-skill ## 把 skill 链接到 ~/.claude/skills/keypoint-notify
 	@mkdir -p $(HOME)/.claude/skills
 	@rm -rf $(HOME)/.claude/skills/keypoint-notify
 	ln -s $(CURDIR)/skills/keypoint-notify $(HOME)/.claude/skills/keypoint-notify

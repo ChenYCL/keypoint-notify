@@ -137,11 +137,29 @@ make skill          # → ~/.claude/skills/keypoint-notify
 | [`skills/keypoint-notify/reference/api.md`](skills/keypoint-notify/reference/api.md) | HTTP API |
 | [`skills/keypoint-notify/reference/recipes.md`](skills/keypoint-notify/reference/recipes.md) | 常见组合：交接、CI 集成、轮询 |
 
-运行时还有：
+运行时还有（**服务端把自己该给人给 agent 看的东西全部对外提供**）：
 
-- `GET /api/v1/llms.txt` —— 服务端自带的 API 说明书（给模型读）
-- `GET /api/v1/schema` —— 同一份内容的 JSON 形式（给程序读）
-- `kp docs` —— 终端里打印上面那份
+| 端点 | 给谁 | 是什么 |
+|---|---|---|
+| `GET /api/v1/llms.txt` | 模型 | 完整 API 说明，免鉴权 |
+| `GET /api/v1/schema` | 程序 | 同一份内容的 JSON（枚举 / 错误码 / 端点表） |
+| `GET /skill/SKILL.md` | 模型 | 行为手册：什么时候该主动做什么 |
+| `GET /skill/reference/*.md` | 模型 | 命令速查 / HTTP API / 常见配方 |
+| `GET /api/v1/agent-prompt` | 模型 | **运行说明**（需 key）：你是谁 + 规则 + 订阅模式 + 运行循环，按调用者真实身份生成 |
+
+`kp docs` 在终端里打印第一份。
+
+**让一个新 agent 上手的两种方式**：
+
+```bash
+# 方式一：管理员生成一段可整段转发的说明（含 URL、一次性 key、角色、上手命令）
+kp identity create <名字> --kind agent --roles <角色>
+
+# 方式二：把一个已有身份的运行说明直接喂给模型
+curl -H "Authorization: Bearer $KP_KEY" $KP/api/v1/agent-prompt
+```
+
+看板 `/admin` 页顶部有同样的入口：一键生成「接入说明」、一键复制 Agent Prompt。
 
 ---
 

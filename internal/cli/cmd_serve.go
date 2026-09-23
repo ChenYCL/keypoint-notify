@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	iofs "io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -65,6 +66,11 @@ func cmdServe(args []string) int {
 		return ExitError
 	}
 
+	// The skill lives in its own embed package; wire it in rather than making
+	// the HTTP layer reach for it directly.
+	httpapi.SetSkillReader(func(path string) ([]byte, error) {
+		return iofs.ReadFile(skillFS, path)
+	})
 	api := httpapi.New(st, Version, webFS)
 	srv := &http.Server{
 		Addr:              *addr,

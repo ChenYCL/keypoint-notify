@@ -149,6 +149,18 @@ base_url: %s
 auth:     Authorization: Bearer kp_...    （或 X-API-Key: kp_...）
 docs:     本文档是机器可读的权威说明；/api/v1/schema 是同一份内容的 JSON 形式。
 
+## 先拿这几样（全部免鉴权，除非注明）
+
+  /api/v1/llms.txt        ← 你正在读的这份：API 说明
+  /api/v1/schema          同一份内容的 JSON 形式（枚举 / 错误码 / 端点表）
+  /skill/SKILL.md         行为手册：什么时候该主动做什么、怎么从会话里抽任务
+  /skill/reference/*.md   命令速查 / HTTP API / 常见配方
+  /api/v1/agent-prompt    运行说明（需带 key）：你是谁 + 规则 + 订阅模式 + 运行循环
+                          这是「粘给一个 agent 就能让它上手」的那一份，
+                          内容按调用者的真实身份和角色生成。
+
+想最快让一个 agent 动起来：把 /api/v1/agent-prompt 的输出整个喂给它。
+
 ## 这个系统是干什么的
 
 一个任务中枢。人用浏览器看板；Claude Code 之类的 agent 通过 HTTP API

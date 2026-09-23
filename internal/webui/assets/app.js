@@ -995,6 +995,24 @@ async function renderAdmin() {
 
   let html = '<div class="admin-grid">';
 
+  // Onboarding first: the most common reason to open this page is "I need to
+  // put another agent to work", and that should not require reading the rest.
+  html += '<div class="panel" style="grid-column:1/-1">' +
+    '<h3>接入一个新的 agent</h3>' +
+    '<div class="row"><div class="grow">' +
+      '<div class="name">① 给它一个身份</div>' +
+      '<div class="faint small">生成一段可以直接粘贴给对方的说明（含一次性 key）</div>' +
+    '</div><button class="btn tiny primary" id="onboard-new">+ 生成接入说明</button></div>' +
+    '<div class="row"><div class="grow">' +
+      '<div class="name">② 或者：把当前身份的运行说明复制走</div>' +
+      '<div class="faint small">你是谁、规则、订阅模式、运行循环 —— 粘给任何模型都能上手</div>' +
+    '</div><button class="btn tiny" id="copy-agent-prompt">复制 Agent Prompt</button>' +
+      '<a class="btn tiny" href="/skill/SKILL.md" target="_blank">看 SKILL.md</a>' +
+      '<a class="btn tiny" href="/api/v1/llms.txt" target="_blank">llms.txt</a>' +
+    '</div>' +
+    '<div id="onboard-slot"></div>' +
+  '</div>';
+
   // identities
   html += '<div class="panel"><h3>身份（API key）</h3>';
   for (const id of ids.identities) {
@@ -1092,6 +1110,47 @@ async function renderAdmin() {
     try { await api('DELETE', '/webhooks/' + b.dataset.hookDel); route(); }
     catch (e) { fail(e); }
   });
+
+  document.getElementById('copy-agent-prompt').onclick = async () => {
+    try {
+      const text = await api('GET', '/agent-prompt', undefined, true);
+      await copy(text, 'Agent Prompt（粘给任何模型）');
+    } catch (e) { fail(e); }
+  };
+
+  document.getElementById('onboard-new').onclick = async () => {
+    const name = prompt('给这个 agent 起个名字（如 ci-runner、fe-bot）');
+    if (!name) return;
+    const roles = prompt('它接什么角色？（逗号分隔，如 frontend,review）', 'member') || 'member';
+    const kind = prompt('类型 human/agent', 'agent') || 'agent';
+    try {
+      const r = await api('POST', '/identities', {
+        name, kind, roles: roles.split(',').map(s => s.trim()).filter(Boolean),
+      });
+      // The prompt is rendered server-side so it cannot drift from the API it
+      // describes; the key only ever travels in a POST body.
+      const p = await api('POST', '/agent-prompt', {
+        identity: r.identity.name, key: r.api_key,
+        roles: r.identity.roles, kind: r.identity.kind,
+      });
+      const slot = document.getElementById('onboard-slot');
+      slot.innerHTML =
+        '<div class="key-reveal"><strong>把下面整段发给 ' + esc(name) + '</strong>' +
+        '<textarea readonly id="onboard-text" style="width:100%;height:190px;margin:8px 0;' +
+          'background:var(--bg-sunken);color:var(--fg);border:1px solid var(--line);' +
+          'border-radius:6px;padding:10px;font-family:var(--mono);font-size:11.5px;' +
+          'white-space:pre;overflow:auto"></textarea>' +
+        '<div class="row" style="padding:0">' +
+          '<button class="btn tiny primary" id="onboard-copy">复制整段</button>' +
+          '<button class="btn tiny" id="onboard-view">在页面里看</button>' +
+          '<span class="faint small">key 只在这里出现，离开页面就没了</span>' +
+        '</div></div>';
+      document.getElementById('onboard-text').value = p.prompt;
+      document.getElementById('onboard-copy').onclick = () =>
+        copy(p.prompt, name + ' 的接入说明');
+      document.getElementById('onboard-view').onclick = () => showPlain(p.prompt);
+    } catch (e) { fail(e); }
+  };
 
   document.getElementById('id-new').onclick = async () => {
     const name = prompt('新身份名（如 ci-runner、reviewer-bot）');
