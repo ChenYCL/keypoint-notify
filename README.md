@@ -1,5 +1,7 @@
 # Keypoint Notify
 
+[English](README.en.md) · **中文**
+
 把"人/agent 在 Claude Code 里干的活"变成结构化、可查询、可分发的任务。
 一个 Go 单二进制：服务端、看板、CLI 全在里面。
 
@@ -182,6 +184,9 @@ make skill          # → ~/.claude/skills/（开发用，软链）
 | 文件 | 内容 |
 |---|---|
 | [`docs/design.md`](docs/design.md) | **为什么这么设计**：取舍、被否掉的方案、已知边界 |
+| [`docs/stability.md`](docs/stability.md) | **什么是契约、什么不是** —— 在它之上写工具之前先读这份 |
+| [`SECURITY.md`](SECURITY.md) | 漏洞报告，以及**部署前必须评估的设计取舍** |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | 怎么编译、评审看什么 |
 | [`docs/deploy-tunnel.md`](docs/deploy-tunnel.md) | 部署：launchd、Cloudflare 隧道、Docker、备份、安全清单 |
 | [`skills/keypoint-notify/SKILL.md`](skills/keypoint-notify/SKILL.md) | Skill 本体：什么时候用、怎么从会话抽任务 |
 | [`skills/keypoint-notify/reference/commands.md`](skills/keypoint-notify/reference/commands.md) | 全部命令与参数 |
