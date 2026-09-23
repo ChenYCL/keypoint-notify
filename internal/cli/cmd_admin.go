@@ -40,7 +40,13 @@ func (a *app) role(args []string) int {
 			return ExitUsage
 		}
 		var raw map[string]any
-		path := "/api/v1/roles" + choiceQ(*keys, "keys=1", choiceQ(*holders, "holders=1", ""))
+		path := "/api/v1/roles"
+		switch {
+		case *keys:
+			path += "?keys=1"
+		case *holders:
+			path += "?holders=1"
+		}
 		if err := a.cl.Get(path, &raw); err != nil {
 			return a.fail(err)
 		}
@@ -118,11 +124,17 @@ func (a *app) role(args []string) int {
 	}
 }
 
-func choiceQ(cond bool, yes, no string) string {
-	if cond {
-		return yes
+// queryIf returns a query suffix (leading "?") when cond holds.
+//
+// The leading "?" is part of the contract: callers append this straight onto a
+// path, and a version that returned a bare `keys=1` silently produced
+// `/api/v1/roleskeys=1` — a 404 that looks like a missing endpoint rather than a
+// malformed URL.
+func queryIf(cond bool, q string) string {
+	if cond && q != "" {
+		return "?" + q
 	}
-	return no
+	return ""
 }
 
 func orElseStr(v, def string) string {
@@ -160,7 +172,11 @@ func (a *app) identity(args []string) int {
 			names = true
 		}
 		var raw map[string]any
-		if err := a.cl.Get("/api/v1/identities"+choiceQ(names, "?names=1", ""), &raw); err != nil {
+		path := "/api/v1/identities"
+		if names {
+			path += "?names=1"
+		}
+		if err := a.cl.Get(path, &raw); err != nil {
 			return a.fail(err)
 		}
 		if a.jsonOut {
