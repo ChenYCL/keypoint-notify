@@ -174,10 +174,22 @@ func (a *app) identity(args []string) int {
 	sub, rest := args[0], args[1:]
 	switch sub {
 	case "ls", "list":
-		names := false
-		if len(rest) > 0 && (rest[0] == "--names" || rest[0] == "-names") {
-			names = true
+		// Hand-rolled flag sniffing here used to swallow --json and --help:
+		// only the literal first argument was inspected, so anything else fell
+		// through to the table renderer. Use the shared parser like every other
+		// subcommand.
+		fs := flag.NewFlagSet("kp identity ls", flag.ContinueOnError)
+		fs.SetOutput(os.Stderr)
+		namesFlag := fs.Bool("names", false, "只输出身份名，每行一个")
+		if err := a.parseSub(fs, rest); err != nil {
+			if errors.Is(err, errHelp) {
+				fmt.Print("kp identity ls [--names] [--json]\n\n" +
+					"  列出身份及其角色、key 前缀。--names 只给名字（脚本/agent 用）。\n")
+				return ExitOK
+			}
+			return ExitUsage
 		}
+		names := *namesFlag
 		var raw map[string]any
 		path := "/api/v1/identities"
 		if names {
