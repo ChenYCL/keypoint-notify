@@ -17,6 +17,11 @@
 
 ---
 
+> **有一台 Linux VPS？** 不用往下看：
+> `curl -fsSL https://raw.githubusercontent.com/ChenYCL/keypoint-notify/main/deploy/install-server.sh | sudo sh -s -- --domain kp.example.com`
+> 一条命令装好 systemd 服务 + HTTPS + 管理员，见 README「服务端：一台 Linux VPS」。
+> 想让 VPS 只听 loopback、再套 Cloudflare 隧道：加 `--local`，然后看下面第 2 节。
+
 ## 1. 起服务
 
 ```bash

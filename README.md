@@ -120,6 +120,32 @@ curl -H "Authorization: Bearer $KP_KEY" $KP/api/v1/llms.txt
 
 ## 安装
 
+### 服务端：一台 Linux VPS，一条命令
+
+```bash
+# 有域名（推荐）：自动 HTTPS
+curl -fsSL https://raw.githubusercontent.com/ChenYCL/keypoint-notify/main/deploy/install-server.sh | sudo sh -s -- --domain kp.example.com
+
+# 没有域名：直接用 IP + 端口（明文 HTTP，脚本会提示风险）
+curl -fsSL https://raw.githubusercontent.com/ChenYCL/keypoint-notify/main/deploy/install-server.sh | sudo sh
+```
+
+[`deploy/install-server.sh`](deploy/install-server.sh) 做完这些：从 GitHub Release 下载
+`kp`（校验 SHA256）并把 4 个平台的客户端放在旁边（同事的 `install.sh` 按平台拿）、
+建系统用户和 systemd 服务（开机自启、崩溃重启、非 root 运行）、`--domain` 时再起一个
+Caddy 做自动证书、认领管理员并打印管理员 key。重跑就是升级，已有数据和管理员不动。
+
+装完拉人进来（在 VPS 上）：
+
+```bash
+sudo kp-admin identity create alice --kind human --roles frontend
+# → 打印一段接入说明，整段发给对方；对方一条 curl 装好 kp + skill
+```
+
+其他参数：`--local`（只听 127.0.0.1，自己配隧道/反代）、`--port`、`--admin`、
+`--version v0.2.0`、`--uninstall`。发版：推一个 `v*` tag，
+[`release.yml`](.github/workflows/release.yml) 会把四个平台的二进制和 `SHA256SUMS` 发到 Release。
+
 ### 一台什么都没有的新机器
 
 ```bash

@@ -1,0 +1,37 @@
+name: Release
+
+# Push a tag like v0.2.0 → binaries for four platforms + SHA256SUMS on a GitHub
+# Release. deploy/install-server.sh downloads from releases/latest, so a VPS
+# can be set up with one curl without Go or the repository.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go vet ./...
+      - run: go test ./... -count=1
+      - run: make dist VERSION="${GITHUB_REF_NAME}"
+      - name: smoke test the release binary
+        run: |
+          ./dist/kp-linux-amd64 version | grep -q "${GITHUB_REF_NAME}"
+          (cd dist && sha256sum -c SHA256SUMS)
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/kp-* dist/SHA256SUMS deploy/install-server.sh \
+            --title "$GITHUB_REF_NAME" --generate-notes

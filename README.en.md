@@ -163,6 +163,28 @@ Single HTML + vanilla JS, embedded in the binary, no build step.
 
 ## Install
 
+### Server: one Linux VPS, one command
+
+```bash
+# With a domain (recommended): automatic HTTPS via Caddy
+curl -fsSL https://raw.githubusercontent.com/ChenYCL/keypoint-notify/main/deploy/install-server.sh | sudo sh -s -- --domain kp.example.com
+
+# No domain: IP + port over plain HTTP (the script warns about it)
+curl -fsSL https://raw.githubusercontent.com/ChenYCL/keypoint-notify/main/deploy/install-server.sh | sudo sh
+```
+
+[`deploy/install-server.sh`](deploy/install-server.sh) downloads `kp` from the latest
+GitHub Release (SHA256-verified) plus client builds for all four platforms, creates a
+system user and a systemd service (starts on boot, restarts on crash, runs as non-root),
+adds a Caddy service for automatic certificates with `--domain`, claims the admin
+identity and prints its key. Re-running it upgrades in place; data and admin are kept.
+Then, on the VPS: `sudo kp-admin identity create alice --kind human --roles frontend`
+prints an invite whose one-liner installs `kp` and the skill on the colleague's machine.
+
+Other flags: `--local`, `--port`, `--admin`, `--version v0.2.0`, `--uninstall`.
+Releases: push a `v*` tag and [`release.yml`](.github/workflows/release.yml) publishes
+the binaries and `SHA256SUMS`.
+
 ### A machine with nothing on it
 
 ```bash

@@ -4,7 +4,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 LDFLAGS := -s -w -X github.com/ChenYCL/keypoint-notify/internal/cli.Version=$(VERSION)
 
-.PHONY: help build install test vet fmt lint run clean skill uninstall
+.PHONY: help build install test vet fmt lint run clean skill uninstall check sync-skill dist release-bin
 
 help: ## 显示可用目标
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -61,6 +61,9 @@ dist: ## 交叉编译四个平台到 dist/（给 install.sh 用）
 	  CGO_ENABLED=0 GOOS=$$goos GOARCH=$$goarch go build -trimpath \
 	    -ldflags="$(LDFLAGS)" -o dist/kp-$$goos-$$goarch ./cmd/keypoint & \
 	done; wait
+	@# 并行编译时一个失败 wait 也返回 0 —— 逐个确认产物在
+	@for t in $(DIST_PLATFORMS); do test -s dist/kp-$${t%%/*}-$${t##*/} || { echo "缺 kp-$${t%%/*}-$${t##*/}"; exit 1; }; done
+	@cd dist && (command -v sha256sum >/dev/null && sha256sum kp-* || shasum -a 256 kp-*) > SHA256SUMS
 	@ls -lh dist/ | tail -n +2
 	@echo "把 dist/ 放到服务端二进制旁边的 bin/ 目录，install.sh 就能按平台发对应版本"
 
