@@ -24,8 +24,21 @@ type Config struct {
 	APIKey     string `json:"api_key"`
 	Identity   string `json:"identity,omitempty"`
 	ActiveRole string `json:"active_role,omitempty"`
+	// PublicURL is the address to hand to other people, when it differs from
+	// Server. An admin on the server box talks to 127.0.0.1 — the one address
+	// that always works there — but an invite carrying 127.0.0.1 is useless to
+	// the person receiving it.
+	PublicURL string `json:"public_url,omitempty"`
 	// Path is not serialised; it records where this config was loaded from.
 	Path string `json:"-"`
+}
+
+// InviteURL is the server address to put in anything sent to someone else.
+func (c *Config) InviteURL() string {
+	if c.PublicURL != "" {
+		return strings.TrimRight(c.PublicURL, "/")
+	}
+	return c.Server
 }
 
 // Dir returns the config directory, honouring KEYPOINT_HOME for tests and for

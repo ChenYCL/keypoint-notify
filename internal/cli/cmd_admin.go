@@ -32,6 +32,13 @@ func (a *app) role(args []string) int {
 	}
 	sub, rest := args[0], args[1:]
 	switch sub {
+	case "rm", "del":
+		var err error
+		if rest, err = a.bareArgs("kp role rm", rest); err != nil {
+			return subExit(err)
+		}
+	}
+	switch sub {
 	case "ls", "list":
 		fs := flag.NewFlagSet("kp role ls", flag.ContinueOnError)
 		fs.SetOutput(os.Stderr)
@@ -173,6 +180,13 @@ func (a *app) identity(args []string) int {
 	}
 	sub, rest := args[0], args[1:]
 	switch sub {
+	case "use", "rotate", "invite", "disable", "enable":
+		var err error
+		if rest, err = a.bareArgs("kp identity "+sub, rest); err != nil {
+			return subExit(err)
+		}
+	}
+	switch sub {
 	case "ls", "list":
 		// Hand-rolled flag sniffing here used to swallow --json and --help:
 		// only the literal first argument was inspected, so anything else fell
@@ -269,8 +283,14 @@ func (a *app) identity(args []string) int {
 		fmt.Println("  ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈")
 		fmt.Println("  你被拉进了一个 Keypoint 协作中枢（任务 / 上报 / 交接）。")
 		fmt.Println()
-		fmt.Println("  一条命令接入：")
-		fmt.Printf("    kp init --server %s --key %s --yes\n", a.cfg.Server, key)
+		// Most people receiving this have no kp yet, so the one-liner that
+		// installs it (and the skill) comes first — `kp init` alone assumes the
+		// binary is already there.
+		fmt.Println("  还没装 kp：一条命令装好 kp、接入、并把 skill 装进本机的 Claude Code 等 CLI")
+		fmt.Printf("    curl -fsSL \"%s/install.sh?key=%s\" | sh\n", a.cfg.InviteURL(), key)
+		fmt.Println()
+		fmt.Println("  已经装了 kp：")
+		fmt.Printf("    kp init --server %s --key %s --yes\n", a.cfg.InviteURL(), key)
 		fmt.Println()
 		fmt.Printf("  你的身份是 %s，角色 @%s。\n", name, strings.Join(granted, "、@"))
 		fmt.Println("  接入后：")
@@ -358,17 +378,22 @@ func (a *app) identity(args []string) int {
 		if err := a.cl.Post("/api/v1/identities/"+id+"/rotate", map[string]any{}, &raw); err != nil {
 			return a.fail(err)
 		}
+		// Rotating yourself invalidates the key this config holds, so the new
+		// one has to be saved before anything returns — including --json, which
+		// used to return first and leave the machine locked out.
+		selfUpdated := false
+		if a.cfg.Identity == rest[0] {
+			a.cfg.APIKey = str(raw["api_key"])
+			selfUpdated = a.cfg.Save() == nil
+		}
 		if a.jsonOut {
 			a.out(raw)
 			return ExitOK
 		}
 		fmt.Printf("✓ 新 API key：%s\n", str(raw["api_key"]))
 		fmt.Println("  旧 key 已失效。用它的会话需要重新 kp init。")
-		if a.cfg.Identity == rest[0] {
-			a.cfg.APIKey = str(raw["api_key"])
-			if err := a.cfg.Save(); err == nil {
-				fmt.Println("  （本机就是它，已自动更新本地配置）")
-			}
+		if selfUpdated {
+			fmt.Println("  （本机就是它，已自动更新本地配置）")
 		}
 		return ExitOK
 
@@ -510,6 +535,13 @@ func (a *app) hook(args []string) int {
 		return ExitOK
 	}
 	sub, rest := args[0], args[1:]
+	switch sub {
+	case "ls", "list", "rm", "del":
+		var err error
+		if rest, err = a.bareArgs("kp hook "+sub, rest); err != nil {
+			return subExit(err)
+		}
+	}
 	switch sub {
 	case "ls", "list":
 		var raw map[string]any

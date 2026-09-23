@@ -18,7 +18,10 @@ import (
 // whoami / board
 // ---------------------------------------------------------------------------
 
-func (a *app) whoami() int {
+func (a *app) whoami(args []string) int {
+	if _, err := a.bareArgs("kp whoami", args); err != nil {
+		return subExit(err)
+	}
 	var r struct {
 		Identity struct {
 			ID         string   `json:"id"`
@@ -53,7 +56,10 @@ func (a *app) whoami() int {
 	return ExitOK
 }
 
-func (a *app) board() int {
+func (a *app) board(args []string) int {
+	if _, err := a.bareArgs("kp board", args); err != nil {
+		return subExit(err)
+	}
 	var r struct {
 		Identity struct {
 			Name string `json:"name"`
@@ -747,6 +753,10 @@ assign 之后对方用 ` + "`kp task pack KP-12 --side ui`" + ` 就能独立开�
 		return ExitOK
 
 	case "rm", "del":
+		rest, err := a.bareArgs("kp task side rm", rest)
+		if err != nil {
+			return subExit(err)
+		}
 		if len(rest) < 2 {
 			return a.usage("用法：kp task side rm <code> <key>", "")
 		}
@@ -783,6 +793,10 @@ func sideStatusCN(s string) string {
 // ---------------------------------------------------------------------------
 
 func (a *app) taskStatus(args []string) int {
+	args, err := a.bareArgs("kp task status", args)
+	if err != nil {
+		return subExit(err)
+	}
 	if len(args) < 2 {
 		return a.usage("用法：kp task status <code> <新状态>",
 			"状态："+strings.Join([]string{model.StatusInbox, model.StatusReady, model.StatusDoing,
@@ -1018,6 +1032,10 @@ func (a *app) taskNew(args []string) int {
 }
 
 func (a *app) taskDelete(args []string) int {
+	args, err := a.bareArgs("kp task rm", args)
+	if err != nil {
+		return subExit(err)
+	}
 	if len(args) < 1 {
 		return a.usage("用法：kp task rm <code>", "会连带删除工作面、分段和上报")
 	}

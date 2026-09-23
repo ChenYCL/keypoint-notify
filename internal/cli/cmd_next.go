@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -161,26 +162,25 @@ Ctrl-C 退出。每拿到一条，游标自动前进，不会重复。
 		a.cfg.Identity, a.cfg.ActiveRole)
 
 	for {
+		// One request per round. This used to ask twice — JSON to learn whether
+		// there was work, then markdown to print it — and with claim=1 both
+		// requests dispatched: `kp loop --max 1` could take two faces and hand
+		// only the second one to --run, leaving the first owned by nobody who
+		// was working on it.
 		path := "/api/v1/me/next" + client.Q(
 			"wait", itoaOrEmpty(*wait), "since", cursor,
 			"side", *side, "task", *task, "exclude", *exclude, "claim", boolQ(*claim),
 		)
-		var envelope struct {
-			Cursor int64          `json:"cursor"`
-			Work   map[string]any `json:"work"`
-		}
-		if err := a.cl.Get(path+"&format=json", &envelope); err != nil {
-			return a.fail(err)
-		}
-		cursor = fmt.Sprintf("%d", envelope.Cursor)
-
-		if envelope.Work == nil {
-			continue
-		}
-
 		text, err := a.cl.GetText(path)
 		if err != nil {
 			return a.fail(err)
+		}
+		next, hasWork := nextCursor(text)
+		if next != "" {
+			cursor = next
+		}
+		if !hasWork {
+			continue
 		}
 		handled++
 		fmt.Printf("\n════ 第 %d 条 ════\n%s", handled, text)
@@ -199,6 +199,19 @@ Ctrl-C 退出。每拿到一条，游标自动前进，不会重复。
 		}
 	}
 }
+
+// nextCursor reads the markdown form of /me/next: whether it carries work, and
+// the cursor to continue from. Both shapes put the cursor on the first line —
+// `<!-- keypoint next · reason=… · cursor=N -->` or `（没有属于你的活）\ncursor=N`.
+func nextCursor(text string) (cursor string, hasWork bool) {
+	hasWork = !strings.HasPrefix(text, "（没有属于你的活）")
+	if m := cursorRe.FindStringSubmatch(text); m != nil {
+		cursor = m[1]
+	}
+	return cursor, hasWork
+}
+
+var cursorRe = regexp.MustCompile(`cursor=(\d+)`)
 
 // runWithPack executes a command with the pack on stdin and in $KP_PACK.
 func runWithPack(command, packText string) error {
@@ -227,6 +240,10 @@ func (a *app) claim(args []string) int {
 已被拿走时退出码非 0，并提示先上报交接。
 `)
 		return ExitOK
+	}
+	args, err := a.bareArgs("kp claim", args)
+	if err != nil {
+		return subExit(err)
 	}
 	if len(args) < 2 {
 		return a.usage("用法：kp claim <code> <side>", "认领后会记在你名下，同角色的其他会话不会再捡走")

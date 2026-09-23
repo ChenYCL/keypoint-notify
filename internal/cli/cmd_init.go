@@ -207,7 +207,9 @@ func cmdConfig(args []string) int {
 
   kp config show            打印当前配置（key 打码）
   kp config get server      取单个字段
-  kp config set server URL  改字段（server / api_key / active_role / identity）
+  kp config set server URL  改字段（server / api_key / active_role / identity / public_url）
+  kp config set public_url https://kp.example.com
+                            接入说明里给别人的地址（管理员在服务端本机连 127.0.0.1 时用）
   kp config path            配置文件路径
   kp config env             打印可导出的环境变量
 `)
@@ -248,8 +250,10 @@ func cmdConfig(args []string) int {
 			fmt.Println(cfg.Identity)
 		case "active_role":
 			fmt.Println(cfg.ActiveRole)
+		case "public_url":
+			fmt.Println(cfg.PublicURL)
 		default:
-			fmt.Fprintf(os.Stderr, "✗ 未知字段 %q（server / api_key / identity / active_role）\n", args[1])
+			fmt.Fprintf(os.Stderr, "✗ 未知字段 %q（server / api_key / identity / active_role / public_url）\n", args[1])
 			return ExitUsage
 		}
 		return ExitOK
@@ -267,6 +271,8 @@ func cmdConfig(args []string) int {
 			cfg.Identity = args[2]
 		case "active_role":
 			cfg.ActiveRole = args[2]
+		case "public_url":
+			cfg.PublicURL = strings.TrimRight(args[2], "/")
 		default:
 			fmt.Fprintf(os.Stderr, "✗ 未知字段 %q\n", args[1])
 			return ExitUsage

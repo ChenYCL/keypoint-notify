@@ -61,7 +61,7 @@ func (e *Error) Pretty() string {
 	if e.Hint != "" {
 		fmt.Fprintf(&b, "  → %s\n", e.Hint)
 	}
-	if len(e.Options) > 0 && len(e.Options) <= 12 {
+	if len(e.Options) > 0 && len(e.Options) <= 16 {
 		fmt.Fprintf(&b, "  可选值：%s\n", strings.Join(e.Options, ", "))
 	}
 	return b.String()

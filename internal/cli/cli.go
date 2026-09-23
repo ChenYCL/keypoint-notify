@@ -122,7 +122,7 @@ func Run(args []string) int {
 	// per-command help texts are the same ones shown on a bare `kp <cmd>`, so
 	// there is nothing extra to maintain — and it means help never falls
 	// through to a network call.
-	if helpOnly {
+	if helpOnly && !hasOwnHelp(cmd, rest) {
 		if print := helpFor(cmd); print != nil {
 			print()
 			return ExitOK
@@ -131,9 +131,9 @@ func Run(args []string) int {
 
 	switch cmd {
 	case "whoami":
-		return a.whoami()
+		return a.whoami(rest)
 	case "board":
-		return a.board()
+		return a.board(rest)
 	case "task", "tasks":
 		return a.task(rest)
 	case "report", "rep":
@@ -536,6 +536,31 @@ func (a *app) parseSub(fs *flag.FlagSet, args []string) error {
 	return nil
 }
 
+// bareArgs is parseSub for commands that have no flags of their own, returning
+// the positional arguments that remain.
+//
+// Those commands used to index their arguments directly, which broke the
+// "global flags go anywhere" promise both ways: a trailing --json was silently
+// ignored (`kp whoami --json` printed the table), and a leading one was taken
+// as a positional (`kp identity rotate --json bob` → 没有身份 "--json").
+func (a *app) bareArgs(name string, args []string) ([]string, error) {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	if err := a.parseSub(fs, args); err != nil {
+		return nil, err
+	}
+	return fs.Args(), nil
+}
+
+// subExit maps a parseSub/bareArgs error to an exit code: asking for help is a
+// success, anything else is a usage error.
+func subExit(err error) int {
+	if errors.Is(err, errHelp) {
+		return ExitOK
+	}
+	return ExitUsage
+}
+
 // intersperse reorders arguments so flags may appear after positional ones.
 //
 // The stdlib flag package stops parsing at the first non-flag token, which
@@ -578,6 +603,26 @@ func wantsHelp(args []string) bool {
 			return false
 		}
 		if a == "-h" || a == "--help" {
+			return true
+		}
+	}
+	return false
+}
+
+// hasOwnHelp reports whether a subcommand prints its own, more detailed help.
+//
+// The generic `kp task` page says "建任务，见 kp task new --help" — and
+// answering that request with the generic page again sent readers in a circle.
+// An agent that could not find the --from-json shape tried it twice and gave
+// up; the shape was in taskNew's usage all along, just never reachable.
+func hasOwnHelp(cmd string, rest []string) bool {
+	if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
+		return false
+	}
+	switch cmd {
+	case "task", "tasks":
+		switch rest[0] {
+		case "new", "create", "add", "list", "ls", "side", "sides":
 			return true
 		}
 	}
