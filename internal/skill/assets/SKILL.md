@@ -163,7 +163,14 @@ kp task new --from-json - <<'EOF'
 EOF
 ```
 
+**在 Claude Code 里用文件，不用 heredoc**：`<<'EOF'` 里的花括号加引号会被 Claude Code 的
+Bash 安全检查当成可疑展开拦下（非交互模式直接拒绝，交互模式要人确认）。先用 Write 工具把
+JSON 写到临时文件，再 `kp task new --from-json /tmp/…/task.json`。`kp report --from-json` 同理。
+
 `--from-json` 是**严格模式**：字段名拼错会直接报错（不会静默丢掉）。这是好事，改掉重来。
+报错里的「你是指」就是它该在的位置 —— 最常见的错是把 `goal` / `acceptance` 这些分段
+写在顶层（它们属于 `"segments": {...}`），以及在工作面上写 `role`（应为 `assignee_role`）。
+忘了形状：`kp task new --help`。
 
 ### 或者用 flag（短任务更快）
 
@@ -273,6 +280,13 @@ kp next --wait 30 --claim
 
 **游标不用自己管。** 省略 `--since` 时服务端用你上次调用存下的游标，
 所以循环不会反复收到同一条提及；要回放才显式传 `--since`。
+
+**`--wait` 只为新东西醒来。** 已经在你名下、之后没变化的工作面不会让它立刻返回。
+所以上报 question / blocker 之后，直接 `kp next --wait 30` 等回答就行 —— 它会挂着，
+直到对方 @ 你。新会话想接着干手上已认领的活：`kp next`（不带 `--wait`）或 `kp board`。
+
+**blocker 会把工作面置为 `blocked`，它不会再被当成活派出去。** 拿到回答、可以继续时，
+自己改回来：`kp task side assign KP-12 ui --status doing`。
 
 ### 三个会话接力的完整样子
 
