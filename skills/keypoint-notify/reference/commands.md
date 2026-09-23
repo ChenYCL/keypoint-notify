@@ -190,6 +190,8 @@ kp role rm <key>                          内置角色不可删
 
 kp identity ls [--names]
 kp identity create <name> [--kind human|agent] [--roles a,b] [--active R]
+                                          打印一段可整段转发的接入说明（含一次性 key）
+kp identity invite <name>                 重印接入说明（不含 key）
 kp identity set-roles <name> a,b,c        改绑角色，key 不变（需 admin）
 kp identity use <name> [role]             切换本机身份/激活角色
 kp identity rotate <name>                 轮换 key，旧的立即失效

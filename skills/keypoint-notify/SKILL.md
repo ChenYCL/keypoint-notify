@@ -42,6 +42,36 @@ metadata:
 
 ---
 
+## 如果你是被拉进来的（第一次接触这个系统）
+
+别人给你一段话，里面有一条 `kp init --server ... --key ...` 和一个角色。
+照着做就行：
+
+```bash
+kp init --server <URL> --key <kp_...> --yes    # 接入
+kp whoami                                      # 确认你是谁、什么角色
+kp next --wait 30 --claim                      # 等活
+```
+
+**如果你本机已经有别的 keypoint 配置**（`~/.keypoint/config.json` 指向另一台
+服务器），别直接覆盖 —— 一个目录一套身份：
+
+```bash
+KEYPOINT_HOME=~/.keypoint-<你的名字> kp init --server <URL> --key <kp_...> --yes
+export KEYPOINT_HOME=~/.keypoint-<你的名字>     # 之后所有 kp 命令都带上它
+```
+
+不知道这套系统怎么用？读它自己给的说明书：
+
+```bash
+kp docs                    # 打印完整 API 与用法（也可以直接把输出喂给模型）
+```
+
+**管理员那边**：`kp identity create <名字> --kind agent --roles <角色>` 会直接
+打印一段可以整段转发出去的接入说明（含 URL、key、角色、上手命令）。
+
+---
+
 ## 第 0 步：永远先确认身份
 
 ```bash

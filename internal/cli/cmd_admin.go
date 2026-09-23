@@ -219,9 +219,29 @@ func (a *app) identity(args []string) int {
 			a.out(raw)
 			return ExitOK
 		}
-		fmt.Printf("✓ 身份 %s 已创建\n\n  API key: %s\n\n", name, str(raw["api_key"]))
-		fmt.Println("  ⚠️  只显示这一次。交给使用者后，让对方跑：")
-		fmt.Printf("     kp init --server %s --key %s\n", a.cfg.Server, str(raw["api_key"]))
+		key := str(raw["api_key"])
+		idn, _ := raw["identity"].(map[string]any)
+		var granted []string
+		for _, r := range anySlice(idn["roles"]) {
+			granted = append(granted, str(r))
+		}
+		fmt.Printf("✓ 身份 %s 已创建（角色 %s）\n\n", name, strings.Join(granted, ", "))
+		fmt.Println("把下面这整段发给对方，对方一条命令就能接入：")
+		fmt.Println()
+		fmt.Println("  ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈")
+		fmt.Println("  你被拉进了一个 Keypoint 协作中枢（任务 / 上报 / 交接）。")
+		fmt.Println()
+		fmt.Println("  一条命令接入：")
+		fmt.Printf("    kp init --server %s --key %s --yes\n", a.cfg.Server, key)
+		fmt.Println()
+		fmt.Printf("  你的身份是 %s，角色 @%s。\n", name, strings.Join(granted, "、@"))
+		fmt.Println("  接入后：")
+		fmt.Println("    kp board                     我手上有什么")
+		fmt.Println("    kp next --wait 30 --claim    等活（会阻塞；有活就返回完整开工包）")
+		fmt.Println("    kp docs                      完整说明（也可以直接喂给模型）")
+		fmt.Println("  ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈")
+		fmt.Println()
+		fmt.Println("  ⚠️  key 只显示这一次，上面那段请立刻发出去；丢了只能 kp identity rotate")
 		return ExitOK
 
 	case "set-roles", "roles":
@@ -310,6 +330,33 @@ func (a *app) identity(args []string) int {
 			}
 		}
 		return ExitOK
+
+	case "invite":
+		if len(rest) < 1 {
+			return a.usage("用法：kp identity invite <name>", "重印发人用的接入说明（不含 key）")
+		}
+		var raw map[string]any
+		if err := a.cl.Get("/api/v1/identities", &raw); err != nil {
+			return a.fail(err)
+		}
+		for _, iv := range anySlice(raw["identities"]) {
+			id, _ := iv.(map[string]any)
+			if str(id["name"]) != rest[0] {
+				continue
+			}
+			var hats []string
+			for _, r := range anySlice(id["roles"]) {
+				hats = append(hats, "@"+str(r))
+			}
+			fmt.Printf("  你被拉进了一个 Keypoint 协作中枢（任务 / 上报 / 交接）。\n\n")
+			fmt.Printf("  用管理员给你的那条 kp init 命令接入，你的身份是 %s，角色 %s。\n\n", rest[0], strings.Join(hats, " "))
+			fmt.Println("  接入后：")
+			fmt.Println("    kp board                     我手上有什么")
+			fmt.Println("    kp next --wait 30 --claim    等活（会阻塞；有活就返回完整开工包）")
+			fmt.Println("    kp docs                      完整说明（也可以直接喂给模型）")
+			return ExitOK
+		}
+		return a.fail(fmt.Errorf("没有身份 %q", rest[0]))
 
 	case "disable", "enable":
 		if len(rest) < 1 {
