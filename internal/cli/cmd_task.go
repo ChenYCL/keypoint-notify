@@ -652,6 +652,9 @@ assign 之后对方用 ` + "`kp task pack KP-12 --side ui`" + ` 就能独立开�
 			return ExitOK
 		}
 		fmt.Printf("✓ 已加工作面 %s\n", key)
+		if w := str(raw["warning"]); w != "" {
+			fmt.Printf("  ⚠ %s\n", w)
+		}
 		if b, ok := raw["blocked_by"].([]any); ok && len(b) > 0 {
 			parts := []string{}
 			for _, x := range b {
@@ -703,6 +706,9 @@ assign 之后对方用 ` + "`kp task pack KP-12 --side ui`" + ` 就能独立开�
 		s, _ := raw["side"].(map[string]any)
 		fmt.Printf("✓ %s/%s → %s  @%s %s\n", code, key, sideStatusCN(str(s["status"])),
 			str(s["assignee_role"]), str(s["assignee_identity"]))
+		if w := str(raw["warning"]); w != "" {
+			fmt.Printf("  ⚠ %s\n", w)
+		}
 		if b, ok := raw["blocked_by"].([]any); ok && len(b) > 0 {
 			parts := []string{}
 			for _, x := range b {

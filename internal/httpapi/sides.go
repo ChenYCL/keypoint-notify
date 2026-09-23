@@ -88,6 +88,15 @@ func (s *Server) handleSideCreate(w http.ResponseWriter, r *http.Request) {
 	if blocked := blockedBy(side, t2); len(blocked) > 0 {
 		resp["blocked_by"] = blocked
 	}
+	// Dispatching work on a task with no goal and no acceptance criteria sends
+	// the receiver off to guess. That is not fatal — "create the shell now, fill
+	// it in later" is a real workflow — so this warns rather than refuses, and
+	// the warning travels in the response where the dispatcher will see it.
+	if missing := thinContent(t2, side); len(missing) > 0 {
+		resp["warning"] = "这个工作面没有可依据的内容：" + strings.Join(missing, "、") +
+			"；承接方只能猜。补上再派，或接受它会来问你"
+		resp["thin_content"] = missing
+	}
 	resp["pack"] = "kp task pack " + t.Code + " --side " + side.Key
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -171,6 +180,18 @@ func (s *Server) handleSidePatch(w http.ResponseWriter, r *http.Request) {
 	if len(blocked) > 0 {
 		resp["blocked_by"] = blocked
 	}
+	// Assigning is the more common dispatch action, so the same warning applies
+	// here — and it fires on a *change* of assignee, not on every save, so
+	// editing an already-thin face does not nag.
+	assigning := (in.AssigneeRole != nil && *in.AssigneeRole != before.AssigneeRole) ||
+		(in.AssigneeIdentity != nil && *in.AssigneeIdentity != before.AssigneeIdentity)
+	if assigning {
+		if missing := thinContent(t2, side); len(missing) > 0 {
+			resp["warning"] = "这个工作面没有可依据的内容：" + strings.Join(missing, "、") +
+				"；承接方只能猜。补上再派，或接受它会来问你"
+			resp["thin_content"] = missing
+		}
+	}
 	writeOK(w, resp)
 }
 
@@ -248,4 +269,31 @@ func requireNonEmpty(w http.ResponseWriter, field, value string) bool {
 		return false
 	}
 	return true
+}
+
+// thinContent lists the things a receiver needs and does not have.
+//
+// It looks at whether *anything* tells the receiver what to do: the task's own
+// goal/acceptance, or a non-empty segment on the face being handed over. A face
+// with its own write-up is dispatchable even if the task-level segments are
+// still blank, because the receiver has something to go on.
+func thinContent(t model.Task, sd model.Side) []string {
+	hasTaskGoal := false
+	for _, sg := range t.Segments {
+		if (sg.Key == "goal" || sg.Key == "acceptance") && strings.TrimSpace(sg.Body) != "" {
+			hasTaskGoal = true
+			break
+		}
+	}
+	hasSideBody := false
+	for _, sg := range sd.Segments {
+		if strings.TrimSpace(sg.Body) != "" {
+			hasSideBody = true
+			break
+		}
+	}
+	if hasTaskGoal || hasSideBody {
+		return nil
+	}
+	return []string{"任务的 goal / acceptance 是空的", "这个工作面也没有自己的分段内容"}
 }

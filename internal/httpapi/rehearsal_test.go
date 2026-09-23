@@ -467,3 +467,76 @@ func TestBootstrapRecoversFromAdminLockout(t *testing.T) {
 	h.doAs(boot.APIKey, "POST", "/api/v1/identities",
 		map[string]any{"name": "after-recovery"}, nil, http.StatusCreated)
 }
+
+// Dispatching work with nothing to go on should say so.
+//
+// Found by running a real session that got handed a task with every segment
+// blank: it correctly refused to invent requirements and reported back "there
+// is nothing here for me to do" — which is the right behaviour for the
+// receiver, and a signal the *dispatcher* should have gotten first.
+func TestThinContentIsFlaggedOnDispatch(t *testing.T) {
+	h := newHarness(t)
+
+	// Empty task: warn on add and on assign.
+	var empty struct {
+		Task struct {
+			Code string `json:"code"`
+		} `json:"task"`
+	}
+	h.do("POST", "/api/v1/tasks", map[string]any{"title": "什么都没写"}, &empty, http.StatusCreated)
+	code := empty.Task.Code
+
+	var added struct {
+		Warning     string   `json:"warning"`
+		ThinContent []string `json:"thin_content"`
+	}
+	h.do("POST", "/api/v1/tasks/"+code+"/sides", map[string]any{
+		"key": "s", "assignee_role": "backend",
+	}, &added, http.StatusCreated)
+	if added.Warning == "" || len(added.ThinContent) == 0 {
+		t.Errorf("adding a side to an empty task should warn, got %+v", added)
+	}
+
+	var assigned struct {
+		Warning string `json:"warning"`
+	}
+	h.do("PATCH", "/api/v1/tasks/"+code+"/sides/s", map[string]any{
+		"assignee_role": "review",
+	}, &assigned, http.StatusOK)
+	if assigned.Warning == "" {
+		t.Error("re-assigning a thin face should warn too")
+	}
+
+	// With a goal, no warning — and a side with its own write-up counts even
+	// when the task-level segments are blank.
+	var good struct {
+		Task struct {
+			Code string `json:"code"`
+		} `json:"task"`
+	}
+	h.do("POST", "/api/v1/tasks", map[string]any{
+		"title":    "有目标",
+		"segments": map[string]string{"goal": "把 X 改成 Y"},
+	}, &good, http.StatusCreated)
+
+	var ok struct {
+		Warning string `json:"warning"`
+	}
+	h.do("POST", "/api/v1/tasks/"+good.Task.Code+"/sides", map[string]any{
+		"key": "s", "assignee_role": "backend",
+	}, &ok, http.StatusCreated)
+	if ok.Warning != "" {
+		t.Errorf("a task with a goal should not warn, got %q", ok.Warning)
+	}
+
+	var ok2 struct {
+		Warning string `json:"warning"`
+	}
+	h.do("POST", "/api/v1/tasks/"+good.Task.Code+"/sides", map[string]any{
+		"key": "t", "assignee_role": "backend",
+		"segments": map[string]string{"做法": "先读 src/x.ts 再改"},
+	}, &ok2, http.StatusCreated)
+	if ok2.Warning != "" {
+		t.Errorf("a face with its own write-up should not warn, got %q", ok2.Warning)
+	}
+}
