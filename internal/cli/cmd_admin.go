@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -37,6 +38,9 @@ func (a *app) role(args []string) int {
 		holders := fs.Bool("holders", false, "带上持有者")
 		keys := fs.Bool("keys", false, "只输出 key 列表")
 		if err := a.parseSub(fs, rest); err != nil {
+			if errors.Is(err, errHelp) {
+				return ExitOK
+			}
 			return ExitUsage
 		}
 		var raw map[string]any
@@ -87,6 +91,9 @@ func (a *app) role(args []string) int {
 		name := fs.String("name", "", "显示名")
 		desc := fs.String("desc", "", "说明：这个角色接什么活")
 		if err := a.parseSub(fs, rest); err != nil {
+			if errors.Is(err, errHelp) {
+				return ExitOK
+			}
 			return ExitUsage
 		}
 		key := fs.Arg(0)
@@ -219,6 +226,9 @@ func (a *app) identity(args []string) int {
 		roles := fs.String("roles", "member", "逗号分隔")
 		active := fs.String("active", "", "激活角色，默认第一个")
 		if err := a.parseSub(fs, rest); err != nil {
+			if errors.Is(err, errHelp) {
+				return ExitOK
+			}
 			return ExitUsage
 		}
 		name := fs.Arg(0)
@@ -265,6 +275,9 @@ func (a *app) identity(args []string) int {
 		fs.SetOutput(os.Stderr)
 		active := fs.String("active", "", "同时改激活角色")
 		if err := a.parseSub(fs, rest); err != nil {
+			if errors.Is(err, errHelp) {
+				return ExitOK
+			}
 			return ExitUsage
 		}
 		name := fs.Arg(0)
@@ -528,6 +541,9 @@ func (a *app) hook(args []string) int {
 		events := fs.String("events", "", "订阅事件，逗号分隔；留空=全部")
 		disable := fs.Bool("disable", false, "先建但停用")
 		if err := a.parseSub(fs, rest); err != nil {
+			if errors.Is(err, errHelp) {
+				return ExitOK
+			}
 			return ExitUsage
 		}
 		url := fs.Arg(0)

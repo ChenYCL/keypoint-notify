@@ -215,6 +215,19 @@ func runWithPack(command, packText string) error {
 // ---------------------------------------------------------------------------
 
 func (a *app) claim(args []string) int {
+	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
+		fmt.Print(`kp claim — 原子认领一个工作面
+
+  kp claim KP-12 ui
+
+认领后这个面记在你名下，同角色的其他会话不会再捡走（服务端用条件 UPDATE
+保证只有一个成功）。只对「指派给你的角色 / 指派给你的身份」生效 ——
+被 mention 不等于接管别人的面。
+
+已被拿走时退出码非 0，并提示先上报交接。
+`)
+		return ExitOK
+	}
 	if len(args) < 2 {
 		return a.usage("用法：kp claim <code> <side>", "认领后会记在你名下，同角色的其他会话不会再捡走")
 	}

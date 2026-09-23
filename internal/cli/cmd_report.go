@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -38,6 +39,9 @@ func (a *app) report(args []string) int {
 		return ExitOK
 	}
 	if err := a.parseSub(fs, args); err != nil {
+		if errors.Is(err, errHelp) {
+			return ExitOK
+		}
 		return ExitUsage
 	}
 	code := fs.Arg(0)
@@ -210,6 +214,9 @@ func (a *app) attach(args []string) int {
 `)
 	}
 	if err := a.parseSub(fs, args); err != nil {
+		if errors.Is(err, errHelp) {
+			return ExitOK
+		}
 		return ExitUsage
 	}
 	files := fs.Args()
@@ -273,6 +280,9 @@ func (a *app) inbox(args []string) int {
 `)
 	}
 	if err := a.parseSub(fs, args); err != nil {
+		if errors.Is(err, errHelp) {
+			return ExitOK
+		}
 		return ExitUsage
 	}
 	if *readAll || *read != "" {
@@ -346,6 +356,9 @@ func (a *app) events(args []string) int {
 `)
 	}
 	if err := a.parseSub(fs, args); err != nil {
+		if errors.Is(err, errHelp) {
+			return ExitOK
+		}
 		return ExitUsage
 	}
 

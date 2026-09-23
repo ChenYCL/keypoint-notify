@@ -47,13 +47,37 @@ type globalOpts struct {
 // command's own flags come after it. Splitting on the first bare word keeps the
 // two grammars from fighting over the same argument.
 func Run(args []string) int {
+	// Asking for help is not an error. flag.Parse reports a bare -h/--help as
+	// ErrHelp, which used to surface as "✗ 全局参数错误: flag: help requested"
+	// and exit 2 — a red error message in response to the most benign input
+	// there is.
+	for _, a := range args {
+		if a == "--" {
+			break
+		}
+		if a == "-h" || a == "--help" {
+			printTopHelp()
+			return ExitOK
+		}
+		if len(a) > 1 && a[0] != '-' {
+			break // reached the subcommand; let it handle its own --help
+		}
+	}
+
 	head, tail := splitAtFirstNonFlag(args)
 	g, err := parseGlobal(head)
 	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			printTopHelp()
+			return ExitOK
+		}
 		fmt.Fprintln(os.Stderr, "✗", err)
+		fmt.Fprintln(os.Stderr, "  → kp --help 看完整用法")
 		return ExitUsage
 	}
 	if len(tail) == 0 {
+		// No command at all: show the help, but exit non-zero because nothing
+		// was accomplished. Scripts check the code; people read the text.
 		printTopHelp()
 		return ExitUsage
 	}
@@ -73,14 +97,36 @@ func Run(args []string) int {
 	case "config":
 		return cmdConfig(rest)
 	case "docs":
+		if len(rest) > 0 && (rest[0] == "-h" || rest[0] == "--help") {
+			fmt.Print(usageFor("docs"))
+			return ExitOK
+		}
 		return cmdDocs(rest, g)
 	case "install":
 		return cmdInstall(rest, g)
 	}
 
-	a, code := newApp(g)
+	// Help is documentation: it must not require a configured identity, a
+	// reachable server, or any other precondition. Someone who has not
+	// installed anything yet is exactly who needs it most. So when the user is
+	// asking for help, build an app with an empty config (no key, no server
+	// contact) rather than failing at config load.
+	helpOnly := wantsHelp(rest)
+
+	a, code := newAppWith(g, helpOnly)
 	if a == nil {
 		return code
+	}
+
+	// `kp <cmd> --help` for commands that take no flags of their own. The
+	// per-command help texts are the same ones shown on a bare `kp <cmd>`, so
+	// there is nothing extra to maintain — and it means help never falls
+	// through to a network call.
+	if helpOnly {
+		if print := helpFor(cmd); print != nil {
+			print()
+			return ExitOK
+		}
 	}
 
 	switch cmd {
@@ -146,11 +192,23 @@ func parseGlobal(args []string) (globalOpts, error) {
 
 // newApp loads the local config and builds a client. It returns nil plus an
 // exit code when the caller cannot proceed.
-func newApp(g globalOpts) (*app, int) {
+func newApp(g globalOpts) (*app, int) { return newAppWith(g, false) }
+
+// newAppWith is newApp with an escape hatch: tolerant=true accepts a missing or
+// broken config so a help request can still be answered. The client it returns
+// cannot reach anything, which is fine — the caller is only going to print
+// documentation.
+func newAppWith(g globalOpts, tolerant bool) (*app, int) {
 	cfg, err := config.Require()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "✗", err)
-		return nil, ExitNoConf
+		if !tolerant {
+			fmt.Fprintln(os.Stderr, "✗", err)
+			return nil, ExitNoConf
+		}
+		cfg = &config.Config{Server: config.DefaultServer}
+		if loaded, lerr := config.Load(); lerr == nil {
+			cfg = loaded
+		}
 	}
 	if g.server != "" {
 		cfg.Server = strings.TrimRight(g.server, "/")
@@ -436,6 +494,10 @@ type: progress | blocker | decision | handoff | result | question
 // --role is deliberately NOT bound here: on `kp task list` it already means
 // "filter by this role", which is the more common meaning at that position.
 // Use `kp --role X task list` to act as another role.
+// errHelp means "the user asked for help" — not a failure, but not
+// "carry on and do the work" either. Callers turn it into a zero exit.
+var errHelp = errors.New("help requested")
+
 func (a *app) parseSub(fs *flag.FlagSet, args []string) error {
 	var jsonOut *bool
 	var server, key *string
@@ -452,6 +514,12 @@ func (a *app) parseSub(fs *flag.FlagSet, args []string) error {
 		key = fs.String("key", "", "覆盖 API key（也可用 KEYPOINT_API_KEY）")
 	}
 	if err := fs.Parse(intersperse(fs, args)); err != nil {
+		// -h/--help is not a parse failure, but flag.Parse reports it as one.
+		// Returning it would surface as "未知命令" or a red error for the most
+		// benign input a user can type.
+		if errors.Is(err, flag.ErrHelp) {
+			return errHelp
+		}
 		return err
 	}
 	if jsonOut != nil && *jsonOut {
@@ -500,4 +568,76 @@ func intersperse(fs *flag.FlagSet, args []string) []string {
 		positionals = append(positionals, a)
 	}
 	return append(flags, positionals...)
+}
+
+// wantsHelp reports whether the remaining arguments contain -h/--help before
+// any positional argument that would change the meaning of the command.
+func wantsHelp(args []string) bool {
+	for _, a := range args {
+		if a == "--" {
+			return false
+		}
+		if a == "-h" || a == "--help" {
+			return true
+		}
+	}
+	return false
+}
+
+// helpFor returns the function that prints a command's help, for the commands
+// whose help is unconditional (they take no flags of their own). Commands with
+// a flag set handle --help themselves via flag.ErrHelp.
+func helpFor(cmd string) func() {
+	switch cmd {
+	case "task", "tasks":
+		return printTaskHelp
+	case "report", "rep":
+		return printReportHelp
+	case "whoami", "board", "next", "loop", "claim", "inbox", "events",
+		"attach", "install", "docs", "config", "role", "roles", "identity",
+		"id", "hook", "webhook":
+		return func() { fmt.Print(usageFor(cmd)) }
+	}
+	return nil
+}
+
+// usageFor holds the one-line usage for commands that only have a bare form.
+// These are short on purpose: the full text lives in the command's own --help
+// path, and this is the fallback for "I typed --help and nothing was configured".
+func usageFor(cmd string) string {
+	switch cmd {
+	case "whoami":
+		return "kp whoami\n\n  身份、角色、未读、能力、入口提示。\n"
+	case "board":
+		return "kp board\n\n  我手上的工作面 + 我负责的任务 + 下一步建议。\n"
+	case "next":
+		return "kp next [--wait 30] [--claim] [--task KP-12] [--side ui] [--json]\n\n" +
+			"  轮到我干的活：为什么是我 + 完整开工包。没有活时服务端挂起。\n" +
+			"  详见 kp next --help（完整用法见 /skill/reference/commands.md）\n"
+	case "loop":
+		return "kp loop [--wait 20] [--max N] [--run '<cmd>'] [--task KP-12]\n\n" +
+			"  一直等活，拿到就打印（或喂给 --run 指定的命令）。\n"
+	case "claim":
+		return "kp claim <code> <side>\n\n  原子认领一个工作面；已被拿走则退出码非 0。\n"
+	case "inbox":
+		return "kp inbox [--unread] [--read-all] [--read id1,id2] [--limit N]\n\n  收件箱。\n"
+	case "events":
+		return "kp events [--since <游标>] [--type report] [--task KP-12] [--follow]\n\n  事件流。\n"
+	case "attach":
+		return "kp attach <file>... [--task KP-12] [--side ui]\n\n  上传附件。\n"
+	case "install":
+		return "kp install [--target claude,codex,...] [--from URL] [--key kp_xxx] [--dir <路径>]\n\n" +
+			"  从服务端拉 skill 装到本机认识的 CLI 里。\n"
+	case "docs":
+		return "kp docs\n\n  打印 /api/v1/llms.txt（完整 API 说明）。\n"
+	case "config":
+		return "kp config show | get <字段> | set <字段> <值> | path | env\n"
+	case "role", "roles":
+		return "kp role ls [--holders] [--keys] | add <key> | rm <key>\n"
+	case "identity", "id":
+		return "kp identity ls | create <name> | set-roles <name> <roles> | rotate <name> | disable|enable <name>\n"
+	case "hook", "webhook":
+		return "kp hook ls | add <url> [--secret S] [--events a,b] | rm <id>\n"
+	}
+	return "kp " + cmd + "\n"
 }

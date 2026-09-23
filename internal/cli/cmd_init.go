@@ -422,7 +422,15 @@ skill 内容从**服务端**拉（GET /skill/SKILL.md），所以对方拿到的
 这个服务端当前版本的行为手册，不是随二进制发的旧副本。
 `)
 	}
+	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
+		fs.Usage()
+		return ExitOK
+	}
 	if err := fs.Parse(intersperse(fs, args)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fs.Usage()
+			return ExitOK
+		}
 		return ExitUsage
 	}
 
