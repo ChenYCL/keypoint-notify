@@ -218,7 +218,7 @@ kp install --from URL --key kp_xxx         首次接入
 | Codex CLI | `~/.codex/AGENTS.md` | 追加一节，`<!-- keypoint:start -->` 包裹 |
 | Gemini CLI | `~/.gemini/GEMINI.md` | 同上 |
 | opencode | `~/.config/opencode/AGENTS.md` | 同上 |
-| Kimi Code | `~/.kimi/AGENTS.md` | 同上 |
+| Kimi Code | `~/.kimi-code/skills/keypoint-notify/` | 技能目录（同 Claude Code） |
 | 任意 | `./AGENTS.md` | 同上，跟仓库走 |
 
 `auto`（默认）只装到**确实存在配置目录**的 CLI 上；一个都没探测到会明确

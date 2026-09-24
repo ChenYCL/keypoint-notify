@@ -418,7 +418,7 @@ func cmdInstall(args []string, g globalOpts) int {
   codex     ~/.codex/AGENTS.md                          追加一节
   gemini    ~/.gemini/GEMINI.md                         追加一节
   opencode  ~/.config/opencode/AGENTS.md                追加一节
-  kimi      ~/.kimi/AGENTS.md                           追加一节
+  kimi      ~/.kimi-code/skills/keypoint-notify/        技能目录（Kimi Code 认 SKILL.md）
   agents    ./AGENTS.md（当前目录，跟仓库走）            追加一节
 
 auto（默认）会探测哪些目录存在，存在就装。没探测到就提示你用
@@ -549,7 +549,7 @@ var skillTargets = map[string]struct {
 	"codex":    {"~/.codex/AGENTS.md", "Codex CLI（~/.codex/AGENTS.md）"},
 	"gemini":   {"~/.gemini/GEMINI.md", "Gemini CLI（~/.gemini/GEMINI.md）"},
 	"opencode": {"~/.config/opencode/AGENTS.md", "opencode（~/.config/opencode/AGENTS.md）"},
-	"kimi":     {"~/.kimi/AGENTS.md", "Kimi Code（~/.kimi/AGENTS.md）"},
+	"kimi":     {"", "Kimi Code（~/.kimi-code/skills/keypoint-notify/）"},
 	"agents":   {"AGENTS.md", "当前目录 AGENTS.md（跟仓库走，任何 CLI 都读）"},
 }
 
@@ -570,7 +570,7 @@ func detectTargets(home string) []string {
 		"codex":    filepath.Join(home, ".codex"),
 		"gemini":   filepath.Join(home, ".gemini"),
 		"opencode": filepath.Join(home, ".config", "opencode"),
-		"kimi":     filepath.Join(home, ".kimi"),
+		"kimi":     filepath.Join(home, ".kimi-code"),
 	}
 	out := []string{}
 	for _, name := range []string{"claude", "codex", "gemini", "opencode", "kimi"} {
@@ -615,8 +615,11 @@ func installForTargets(spec string, contents map[string]string, server string) (
 
 	for _, name := range names {
 		t := skillTargets[name]
-		if name == "claude" {
-			dir := filepath.Join(home, ".claude", "skills", "keypoint-notify")
+		// Claude Code and Kimi Code both load a real SKILL.md directory, so they
+		// get the full skill tree rather than an appended AGENTS.md section.
+		// Kimi Code keeps its data in ~/.kimi-code/ (the older ~/.kimi/ belonged
+		// to the archived kimi-cli and is not read any more).
+		if dir, ok := skillDirTargets(home)[name]; ok {
 			if err := writeSkillDir(dir, contents); err != nil {
 				return installed, skipped, err
 			}
@@ -681,4 +684,12 @@ func writeSection(path, body, server string) error {
 		text = strings.TrimRight(text, "\n") + "\n\n" + block + "\n"
 	}
 	return os.WriteFile(path, []byte(text), 0o644)
+}
+
+// skillDirTargets are the CLIs that read a SKILL.md directory natively.
+func skillDirTargets(home string) map[string]string {
+	return map[string]string{
+		"claude": filepath.Join(home, ".claude", "skills", "keypoint-notify"),
+		"kimi":   filepath.Join(home, ".kimi-code", "skills", "keypoint-notify"),
+	}
 }

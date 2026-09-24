@@ -227,7 +227,7 @@ Each CLI has a different convention, so each gets a different shape:
 | Codex CLI | `~/.codex/AGENTS.md` | Appended section, delimited |
 | Gemini CLI | `~/.gemini/GEMINI.md` | Same |
 | opencode | `~/.config/opencode/AGENTS.md` | Same |
-| Kimi Code | `~/.kimi/AGENTS.md` | Same |
+| Kimi Code | `~/.kimi-code/skills/keypoint-notify/` | Skill directory (same as Claude Code) |
 | Anything | `./AGENTS.md` | Same, travels with the repo |
 
 `auto` (the default) only installs into CLIs whose config directory actually

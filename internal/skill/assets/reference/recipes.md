@@ -251,3 +251,56 @@ kp init --server https://kp.your-domain.com --key kp_xxx --yes
 ```
 
 详见 `docs/deploy-tunnel.md`。
+
+
+---
+
+## 在 Claude Code / Kimi Code 里开循环：一直等活、有活就干
+
+skill 在循环里怎么被用上，两家各有两种方式。**都实测过的只有 Claude Code**；Kimi Code
+一栏按官方文档写，没有实机跑过。
+
+### Claude Code
+
+**A. 会话内循环（看得见，适合自己盯着）**
+
+```
+/loop /keypoint-notify 用 kp next --wait 50 --claim 接一件活，按开工包做完：上报 result、把工作面置 done。没活就结束这一轮。
+```
+
+- `/loop <prompt>` 不写间隔 = Claude 每轮自己挑下一次等多久（1 分钟到 1 小时）；
+  想固定节奏写 `/loop 1m /keypoint-notify …`。
+- prompt 里可以直接写 `/keypoint-notify`（skill 会被展开），不写也行 —— skill 的描述里有
+  「等活 / 轮到我」，Claude 会自己调它。
+- 只在会话开着、空闲时触发；7 天后自动过期；`Esc` 停掉自适应循环。
+- 权限沿用会话：先在 `/permissions` 里允许 `Bash(kp:*)`，否则每轮都要点确认。
+- 想让裸 `/loop` 就干这个：把上面那段 prompt 写进项目的 `.claude/loop.md`。
+- 同一个会话里上下文会越积越多；长时间跑用 B。
+
+**B. 无人值守（一件活一个新会话，上下文干净）**
+
+```bash
+KEYPOINT_HOME=~/.keypoint-be-bot kp loop --run 'claude -p "/keypoint-notify 照下面的开工包干活。做完先按包末尾的交付契约上报 result，再用 kp task side assign <任务号> <工作面> --status done 交棒。
+
+$KP_PACK" --allowedTools Bash < /dev/null'
+```
+
+- `kp loop` 负责等活和认领，拿到一件就起一个 `claude -p`，把开工包放进 `$KP_PACK`。
+- `--allowedTools Bash` 必须有，否则无头会话执行不了 kp；Skill 工具不需要额外放行。
+- `< /dev/null`：开工包已经在 prompt 里了，别让 `claude -p` 再从 stdin 读一遍。
+- 「置 done」要写明 —— 只上报 result 的话工作面停在 doing，下游永远等不到解封。
+
+### Kimi Code
+
+- skill 装在 `~/.kimi-code/skills/keypoint-notify/`（`kp install --target kimi`），
+  也认通用目录 `~/.agents/skills/`。手动调用是 `/skill:keypoint-notify`，也会按描述自动调用。
+- 没有 `/loop`，用 `kp loop` 包一层：
+
+```bash
+KEYPOINT_HOME=~/.keypoint-be-bot kp loop --run 'kimi -p "用 keypoint-notify skill，照下面的开工包干活。做完先上报 result，再用 kp task side assign <任务号> <工作面> --status done 交棒。
+
+$KP_PACK" < /dev/null'
+```
+
+- `kimi -p` 非交互模式默认自动批准工具调用（`--yolo` 不能和 `-p` 同时用），所以不用像
+  Claude 那样放行 Bash。

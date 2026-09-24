@@ -5,8 +5,17 @@
 
 ## 未发布
 
+### 新增
+
+- skill 描述加上「等活 / 轮到我 / 循环接活」，循环模式下能被自动调起；配方里新增
+  「在 Claude Code / Kimi Code 里开循环」（`/loop`、`kp loop` + `claude -p` / `kimi -p`）。
+
 ### 修复
 
+- **`kp install --target kimi` 装到了错的地方**：原来写 `~/.kimi/AGENTS.md`，那是已归档的旧
+  kimi-cli 的目录。现在的 Kimi Code 用 `~/.kimi-code/`，而且原生认 SKILL.md，所以改为装
+  完整技能目录到 `~/.kimi-code/skills/keypoint-notify/`（和 Claude Code 一样），自动探测也
+  改看 `~/.kimi-code`。
 - **删掉的任务不再在收件箱里留死链**：删除任务时一并清掉指向它的通知，只留「任务已删除」
   那一条，且不可点。看板打开一个不存在的任务时显示「已被删除」和回看板的链接，而不是
   一直「加载中…」。
