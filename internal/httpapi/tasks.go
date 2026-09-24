@@ -424,6 +424,9 @@ func (s *Server) handleTaskPatch(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleTaskDelete(w http.ResponseWriter, r *http.Request) {
 	actor := identity(r)
+	if !requireAdmin(w, actor, "删除任务", "只是不想要了可以归档：kp task status <code> archived") {
+		return
+	}
 	t, err := s.St.GetTask(r.PathValue("code"))
 	if err != nil {
 		respondError(w, s.taskNotFound(r.PathValue("code"), err))

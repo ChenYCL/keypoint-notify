@@ -165,6 +165,9 @@ func (s *Server) handleRoleList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRoleUpsert(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, identity(r), "新建或修改角色", "") {
+		return
+	}
 	var in model.Role
 	if err := decodeJSON(r, &in); err != nil {
 		respondError(w, err)
@@ -189,6 +192,9 @@ func (s *Server) handleRoleUpsert(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRoleDelete(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, identity(r), "删除角色", "") {
+		return
+	}
 	if err := s.St.DeleteRole(r.PathValue("key")); err != nil {
 		if strings.Contains(err.Error(), "builtin") {
 			respondError(w, NewError(http.StatusForbidden, "builtin_role",
@@ -227,6 +233,9 @@ func (s *Server) handleWebhookList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleWebhookUpsert(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, identity(r), "配置 webhook", "") {
+		return
+	}
 	var in struct {
 		ID      string   `json:"id"`
 		URL     string   `json:"url"`
@@ -257,6 +266,9 @@ func (s *Server) handleWebhookUpsert(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleWebhookDelete(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, identity(r), "删除 webhook", "") {
+		return
+	}
 	if err := s.St.DeleteWebhook(r.PathValue("id")); err != nil {
 		respondError(w, err)
 		return

@@ -189,7 +189,7 @@ kp events [--since <cursor>] [--type report] [--task KP-12]
 
 ```
 kp role ls [--holders] [--keys]
-kp role add <key> [--name 显示名] [--desc 说明]
+kp role add <key> [--name 显示名] [--desc 说明]      （需 admin）
 kp role rm <key>                          内置角色不可删
 
 kp identity ls [--names]
@@ -202,7 +202,7 @@ kp identity rotate <name>                 轮换 key，旧的立即失效
 kp identity disable <name> / enable <name>
 
 kp hook ls
-kp hook add <url> [--secret S] [--events a,b] [--disable]
+kp hook add <url> [--secret S] [--events a,b] [--disable]   （需 admin）
 kp hook rm <id>
 ```
 

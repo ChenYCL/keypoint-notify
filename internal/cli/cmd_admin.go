@@ -22,8 +22,8 @@ func (a *app) role(args []string) int {
   kp role ls              角色表
   kp role ls --holders    角色 → 谁持有（指派前查这个）
   kp role ls --keys       只要 key 列表（脚本/agent 用）
-  kp role add <key> --name 显示名 --desc 说明
-  kp role rm <key>        删除自定义角色（内置不可删）
+  kp role add <key> --name 显示名 --desc 说明    ← 需 admin
+  kp role rm <key>        删除自定义角色（内置不可删）← 需 admin
 
 角色是"路由地址"，不是职级：任务和工作面按角色指派，谁持有这个角色谁就接。
 内置：member backend frontend review qa ops design
@@ -526,8 +526,8 @@ func (a *app) hook(args []string) int {
 		fmt.Print(`kp hook — 出站 webhook
 
   kp hook ls                            列出订阅与事件词表
-  kp hook add <url> [--secret S --events report.created,side.assigned]
-  kp hook rm <id>
+  kp hook add <url> [--secret S --events report.created,side.assigned]   ← 需 admin
+  kp hook rm <id>                       ← 需 admin
 
 投递带 HMAC 签名头 X-KP-Signature: sha256=<hex>，密钥就是你配的 secret。
 事件类型见 kp hook ls 的输出。可在网页 /admin 里配同样的东西。

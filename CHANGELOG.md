@@ -3,6 +3,15 @@
 契约与非契约的边界见 [`docs/stability.md`](docs/stability.md)。「行为变化」一节列的是
 升级后你的脚本 / agent 循环可能感觉得到的地方。
 
+## 未发布
+
+### 行为变化
+
+- **增删角色、配/删 webhook、删任务现在需要 admin**，非 admin 调用返回 403
+  `forbidden`（带 hint；删任务的 hint 指向「归档」）。SECURITY.md 一直写着这些是 admin
+  动作，但服务端没查 —— 发给 agent 的非 admin key 也能删别人的任务、把 webhook 指到
+  外部地址。脚本里用非 admin key 做这几件事的，换成管理员的 key。
+
 ## v0.1.0 — 2026-09-24
 
 第一个带预编译二进制的版本。问题大多是在一个多角色沙盒里跑出来的：管理员 + 五个各自

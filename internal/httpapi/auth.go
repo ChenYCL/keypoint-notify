@@ -90,6 +90,24 @@ func (s *Server) allowSelfOrAdmin(caller model.Identity, targetID string) *APIEr
 		WithHint("当前身份 %q 持有角色 %s", caller.Name, strings.Join(caller.Roles, ", "))
 }
 
+// requireAdmin guards the management actions SECURITY.md promises are
+// admin-only: role vocabulary, webhooks, deleting tasks. Without it every key —
+// including the ones handed to agents — could delete anyone's task or point a
+// webhook at an outside URL, and "keep the admin key separate" would mean
+// nothing. Reports false after writing the 403.
+func requireAdmin(w http.ResponseWriter, caller model.Identity, action, alternative string) bool {
+	if caller.HasRole("admin") {
+		return true
+	}
+	e := NewError(http.StatusForbidden, "forbidden", "%s需要 admin 角色", action).
+		WithHint("当前身份 %q 持有角色 %s。让管理员用 admin 身份来做", caller.Name, strings.Join(caller.Roles, ", "))
+	if alternative != "" {
+		e.Hint += "；" + alternative
+	}
+	respondError(w, e)
+	return false
+}
+
 // ---------------------------------------------------------------------------
 // Session (browser convenience)
 // ---------------------------------------------------------------------------
