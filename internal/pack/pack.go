@@ -454,6 +454,8 @@ func reportTypeLabel(t string) string {
 		return "结果"
 	case model.ReportQuestion:
 		return "提问"
+	case model.ReportFinding:
+		return "论点"
 	}
 	return t
 }

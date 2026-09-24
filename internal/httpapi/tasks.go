@@ -503,7 +503,7 @@ func taskKindOptions() []string {
 
 func reportTypeOptions() []string {
 	return []string{model.ReportProgress, model.ReportBlocker, model.ReportDecision,
-		model.ReportHandoff, model.ReportResult, model.ReportQuestion}
+		model.ReportHandoff, model.ReportResult, model.ReportQuestion, model.ReportFinding}
 }
 
 // handleMyBoard answers "what is on my plate right now" in one request: open

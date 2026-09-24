@@ -171,7 +171,7 @@ docs:     本文档是机器可读的权威说明；/api/v1/schema 是同一份�
   Segment  分段，任务的细节切片，每段有稳定 key，可单独取用（这是"可复制"的单位）
   Side     工作面，一个任务可并行拆成几块（api / ui / review ...），
            每块有自己的负责人角色、状态、依赖和分段
-  Report   上报，只增不改的时间线条目：progress | blocker | decision | handoff | result | question
+  Report   上报，只增不改的时间线条目：progress | blocker | decision | handoff | result | question | finding
   Identity 身份，一个 API key 对应一个身份；身份持有若干 role，可改绑、可轮换 key
   Event    事件，一切变更都产生事件；驱动收件箱、webhook、SSE
 
@@ -279,6 +279,22 @@ CLI 的工作流短命令（每条都是一整步）：
 
 实测：这条命令在真实的 Claude Code 会话里阻塞 25 秒不会被工具超时打断，
 所以 wait 给 30 是安全的。
+
+## 调研与待定：GET /api/v1/research
+
+调研就是 kind=research 的任务：goal 写要回答的问题，每个方案一个自由分段；
+论点记成 finding 上报，拿不准的记成 question（@ 能拍板的人），定下来记成 decision。
+
+  GET /api/v1/research
+    items           每个调研：question、options（方案分段标题）、findings / open_questions /
+                    decisions 计数、last_decision、state（open | decided）
+    open_questions  **所有**未完成任务里还没有定论的 question（不只是调研任务）
+
+规则：一个 question 之后在同一任务里出现 decision 就算定了；任务完成或归档后不再列出。
+你是调研的人不是拍板的人 —— 没人明确说定了，就只写 finding 和 question，建议也写成 finding。
+
+CLI：kp research（看待定 + 全部调研）· kp research new "问题" --option "A：…" --option "B：…"
+     kp research note|ask|decide KP-12 -m "…"（decide 可加 --close）
 
 ## 另一条路：自己拿 pack
 
@@ -418,7 +434,7 @@ kind:      bug | feature | chore | research | review | incident
 status:    inbox | ready | doing | blocked | review | done | archived
 side 状态:  todo | doing | blocked | done
 priority:  P0 | P1 | P2 | P3
-report:    progress | blocker | decision | handoff | result | question
+report:    progress | blocker | decision | handoff | result | question | finding（调研论点）
 event:     %s
 
 ## 错误怎么长

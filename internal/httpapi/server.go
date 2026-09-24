@@ -75,6 +75,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/stream", auth(http.HandlerFunc(s.handleStream)))
 	mux.Handle("GET /api/v1/me/board", auth(http.HandlerFunc(s.handleMyBoard)))
 	mux.Handle("GET /api/v1/me/next", auth(http.HandlerFunc(s.handleNext)))
+	mux.Handle("GET /api/v1/research", auth(http.HandlerFunc(s.handleResearch)))
 
 	mux.Handle("POST /api/v1/files", auth(http.HandlerFunc(s.handleFileUpload)))
 	mux.Handle("GET /api/v1/files/{id}", auth(http.HandlerFunc(s.handleFileGet)))

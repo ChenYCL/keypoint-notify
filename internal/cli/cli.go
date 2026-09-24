@@ -156,6 +156,8 @@ func Run(args []string) int {
 		return a.watch(rest, false)
 	case "wait":
 		return a.wait(rest)
+	case "research", "rs":
+		return a.research(rest)
 	case "inbox":
 		return a.inbox(rest)
 	case "attach":
@@ -407,6 +409,11 @@ func printTopHelp() {
   kp done KP-12 ui -m "..."         完结：上报结果 + 置完成，下游自动解封
   kp release KP-12 ui -m "..."      放手：还给角色，别人能接
   kp cancel KP-12 -m "..."          取消：记原因并归档
+
+调研 / 讨论:
+  kp research                       待定的问题 + 所有调研
+  kp research new "问题" --option "A：…" --option "B：…"
+  kp research note|ask|decide KP-12 -m "…"   论点 / 拿不准 / 定论
 
 等活 / 订阅:
   kp wait                           有新活或新通知就退出（放后台 = 来了叫醒我）

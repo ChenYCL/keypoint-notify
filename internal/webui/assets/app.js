@@ -159,11 +159,11 @@ const TASK_STATUS = {
 const SIDE_STATUS = { todo: '未开始', doing: '进行中', blocked: '阻塞', done: '已完成' };
 const REPORT_LABEL = {
   progress: '进展', blocker: '阻塞', decision: '决策',
-  handoff: '交接', result: '结果', question: '提问',
+  handoff: '交接', result: '结果', question: '提问', finding: '论点',
 };
 const REPORT_CLASS = {
   progress: '', blocker: 'blocker', decision: 'decision',
-  handoff: 'handoff', result: 'result', question: 'question',
+  handoff: 'handoff', result: 'result', question: 'question', finding: 'finding',
 };
 const COLUMNS = ['inbox', 'ready', 'doing', 'blocked', 'review', 'done'];
 
@@ -335,6 +335,7 @@ function route() {
     return renderTask(S.route.code);
   }
   if (path.startsWith('/inbox')) { S.route = { name: 'inbox' }; return renderInbox(); }
+  if (path.startsWith('/research')) { S.route = { name: 'research' }; return renderResearch(); }
   if (path.startsWith('/admin')) { S.route = { name: 'admin' }; return renderAdmin(); }
   if (path.startsWith('/board') || path.startsWith('/t/')) { S.route = { name: 'board' }; return renderBoard(); }
   S.route = { name: 'home' };
@@ -435,6 +436,7 @@ async function renderHome() {
     ['放手 · 取消', '/kp-cancel', 'kp release KP-12 ui -m "…" · kp cancel KP-12 -m "…"'],
     ['定时自动处理', '/kp-loop 10m', 'kp loop --agent claude'],
     ['订阅 · 来了就开始', '/kp-watch', 'kp wait · kp watch KP-12'],
+    ['调研 · 定论', '/kp-research', 'kp research new · note · ask · decide'],
   ];
   html += '<section class="section"><div class="section-head"><span>斜杠命令</span>' +
     '<span class="rule"></span></div>' +
@@ -572,6 +574,114 @@ function modeCard(name, tag, cmd, why, primary) {
     '<code class="snippet">' + esc(cmd) + '</code>' +
     '<p class="faint small">' + esc(why) + '</p>' +
   '</div>';
+}
+
+/* ------------------------------------------------------------- research
+ *
+ * 调研：agent 或人做的方案对比、讨论里的论点、拿不准的点，以及最后的定论。
+ * 「待定」放最上面 —— 这一页存在的理由，就是让「还没人拍板的事」不会淹在各个
+ * 任务的时间线里。一个 question 之后在同一任务里出现 decision 就算定了，所以
+ * 清掉一条待定的办法只有一个：把结论写下来（「写定论」按钮就是干这个的）。
+ */
+async function renderResearch() {
+  loading();
+  let d;
+  try { d = await api('GET', '/research'); } catch (e) { return fail(e); }
+  const open = d.open_questions || [], items = d.items || [];
+  const badge = document.getElementById('nav-open-q');
+  if (badge) { badge.textContent = open.length; badge.hidden = !open.length; }
+
+  let html = '<div class="home">';
+  html += '<div class="section-head" style="margin-top:6px"><span>调研</span>' +
+    '<span class="chip">' + items.length + ' 个调研</span>' +
+    '<span class="chip' + (open.length ? ' warn' : '') + '">' + open.length + ' 条待定</span>' +
+    '<span class="rule"></span><button class="btn tiny primary" id="rs-new">+ 新调研</button></div>';
+
+  // 待定
+  html += '<section class="section"><div class="section-head"><span>待定 · 需要定论</span><span class="rule"></span></div>';
+  if (!open.length) {
+    html += '<div class="faint small" style="padding:6px 2px 14px">没有悬着的问题。任何任务里的 question 上报都会出现在这里，直到有人写下定论。</div>';
+  } else {
+    html += '<div class="rs-list">' + open.map(q =>
+      '<div class="rs-q">' +
+        '<div class="rs-q-head"><a class="mono" href="/t/' + esc(q.task_code) + '" data-link>' + esc(q.task_code) + '</a>' +
+          '<span class="faint">' + esc(truncate(q.task_title, 40)) + '</span>' +
+          (q.task_kind === 'research' ? '<span class="chip">调研</span>' : '') +
+          '<span class="rule"></span><span class="faint small">' + esc(q.identity_name || '') +
+          ((q.mentions || []).length ? ' → @' + (q.mentions || []).map(esc).join(' @') : '') +
+          ' · ' + fmtWhen(q.created_at) + '</span></div>' +
+        '<div class="rs-q-body">' + esc(q.body) + '</div>' +
+        '<div class="rs-q-actions"><button class="btn tiny" data-decide="' + esc(q.task_code) + '">写定论</button>' +
+          '<button class="btn tiny" data-note="' + esc(q.task_code) + '">补论点</button></div>' +
+      '</div>').join('') + '</div>';
+  }
+  html += '</section>';
+
+  // 调研卡片
+  html += '<section class="section"><div class="section-head"><span>全部调研</span><span class="rule"></span></div>';
+  if (!items.length) {
+    html += '<div class="empty-state"><div class="big">🔍</div>还没有调研' +
+      '<div class="small" style="margin-top:6px">点「+ 新调研」，或在会话里 <code>/kp-research 要回答的问题</code></div></div>';
+  } else {
+    html += '<div class="modes">' + items.map(it =>
+      '<div class="mode rs-card' + (it.state === 'decided' ? '' : ' primary') + '" data-goto="/t/' + esc(it.code) + '">' +
+        '<div class="mode-head"><b class="mono">' + esc(it.code) + '</b>' +
+          '<span class="chip' + (it.state === 'decided' ? ' ok' : ' warn') + '">' + (it.state === 'decided' ? '已定论' : '待定') + '</span></div>' +
+        '<div class="rs-question">' + esc(truncate(it.question, 90)) + '</div>' +
+        ((it.options || []).length ? '<div class="rs-options">' + it.options.map(o => '<span class="chip">' + esc(o) + '</span>').join('') + '</div>' : '') +
+        '<div class="faint small">论点 ' + it.findings + ' · 待定 ' + it.open_questions + ' · 定论 ' + it.decisions + '</div>' +
+        (it.last_decision ? '<div class="rs-decision">定论：' + esc(truncate(it.last_decision.body.replace(/^\s*定论[：:]\s*/, ''), 80)) + '</div>' : '') +
+      '</div>').join('') + '</div>';
+  }
+  html += '</section>';
+
+  // 怎么用
+  html += '<section class="section"><div class="section-head"><span>怎么用</span><span class="rule"></span></div>' +
+    '<table class="cmd-table"><thead><tr><th>做什么</th><th>在会话里</th><th>在终端里</th></tr></thead><tbody>' +
+    [['开一个调研', '/kp-research 要回答的问题', 'kp research new "问题" --option "A：…" --option "B：…"'],
+     ['记论点 / 发现', '/kp-research KP-12 记论点', 'kp research note KP-12 -m "…（带证据）"'],
+     ['拿不准，要人拍板', '/kp-research KP-12 问 @backend', 'kp research ask KP-12 -m "…" --mention @backend'],
+     ['定下来', '/kp-research KP-12 定论', 'kp research decide KP-12 -m "定论：选 A，因为…" --close'],
+     ['看还有什么没定', '', 'kp research']]
+      .map(c => '<tr><td>' + esc(c[0]) + '</td><td><code>' + esc(c[1]) + '</code></td><td><code>' + esc(c[2]) + '</code></td></tr>').join('') +
+    '</tbody></table></section>';
+  html += '</div>';
+  setView(html, true);
+
+  document.querySelectorAll('.rs-card[data-goto]').forEach(el => {
+    el.onclick = () => { history.pushState({}, '', el.dataset.goto); route(); };
+  });
+  const post = async (code, type, label) => {
+    const body = prompt(code + ' · ' + label);
+    if (!body || !body.trim()) return;
+    try {
+      await api('POST', '/tasks/' + encodeURIComponent(code) + '/reports', { type, body: body.trim() });
+      toast('已记下' + label);
+      route();
+    } catch (e) { fail(e); }
+  };
+  document.querySelectorAll('[data-decide]').forEach(b => b.onclick = () => post(b.dataset.decide, 'decision', '定论（写清选了什么、为什么）'));
+  document.querySelectorAll('[data-note]').forEach(b => b.onclick = () => post(b.dataset.note, 'finding', '论点 / 发现'));
+  document.getElementById('rs-new').onclick = async () => {
+    const q = prompt('要回答的问题（例如：通知推送用 SSE 还是长轮询？）');
+    if (!q || !q.trim()) return;
+    const opts = (prompt('方案，用 | 分隔（可留空，之后再补）', 'A：… | B：…') || '')
+      .split('|').map(s => s.trim()).filter(s => s && s !== 'A：…' && s !== 'B：…');
+    try {
+      const r = await api('POST', '/tasks', { title: q.trim().slice(0, 60), kind: 'research', segments: { goal: q.trim() } });
+      const code = r.task.code;
+      for (let i = 0; i < opts.length; i++) {
+        const head = opts[i].split(/[：:]/)[0].trim();
+        await api('POST', '/tasks/' + code + '/segments', {
+          key: 'option-' + String.fromCharCode(97 + i),
+          title: '方案 ' + (head.length <= 12 && head !== opts[i] ? head : String.fromCharCode(65 + i)),
+          body: opts[i],
+        });
+      }
+      toast('已建调研 ' + code);
+      route();
+    } catch (e) { fail(e); }
+  };
 }
 
 // ----------------------------------------------------------------- board

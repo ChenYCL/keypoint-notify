@@ -94,7 +94,7 @@ kp loop --agent claude                     # unattended: one fresh session per i
 
 ## Slash commands (Claude Code / Kimi Code)
 
-`kp install` (or `install.sh`) installs the playbook plus seven command skills — into
+`kp install` (or `install.sh`) installs the playbook plus eight command skills — into
 `~/.claude/skills/` for Claude Code and `~/.kimi-code/skills/` for Kimi Code. Type `/kp`.
 
 | Do | Claude Code | Kimi Code | Terminal |
@@ -106,8 +106,25 @@ kp loop --agent claude                     # unattended: one fresh session per i
 | Release / cancel | `/kp-cancel` | `/skill:kp-cancel` | `kp release …` / `kp cancel …` |
 | Scheduled | `/kp-loop 10m` | — | `kp loop --agent claude` |
 | Subscribe | `/kp-watch` | `/skill:kp-watch` | `kp wait` / `kp watch KP-12` |
+| Research / decide | `/kp-research` | `/skill:kp-research` | `kp research new` / `note` / `ask` / `decide` |
 
 Other agents: feed them `GET /api/v1/llms.txt` and `GET /api/v1/agent-prompt`.
+
+## Research: options, arguments, open questions, decisions
+
+`kp research` and the board's Research page (`/research`) collect what would otherwise be lost in
+chat: **every question on any task that nobody has decided yet**, then each research task with its
+question, options, argument count and latest decision.
+
+```bash
+kp research new "SSE or long polling for notifications?" --option "A: SSE" --option "B: long poll"
+kp research note   KP-12 -m "For B: a 25s block inside a session does not time out (evidence…)"
+kp research ask    KP-12 -m "Do we need offline replay?" --mention @backend
+kp research decide KP-12 -m "Decision: B, because…" --close
+```
+
+One rule: a question counts as settled once a decision is written on the same task after it.
+Agents record arguments and questions; they do not make the call.
 
 ## Best practices
 

@@ -57,6 +57,7 @@ metadata:
 | 放手 / 取消 | `/kp-cancel` | `kp release KP-12 ui -m "…"` · `kp cancel KP-12 -m "…"` |
 | 定时自动处理 | `/kp-loop 10m` | `/loop 10m /kp-next` · 无人值守 `kp loop --agent claude` |
 | 订阅，来了就开始 | `/kp-watch` | `kp wait`（放后台）· `kp watch KP-12` |
+| 调研 / 讨论 / 定论 | `/kp-research` | `kp research new` · `note` · `ask` · `decide` · `kp research` 看待定 |
 
 两条容易漏的：**做完用 `kp done`，不要只报 result**（否则面停在「进行中」，下游永远等不到）；
 **不做了用 `kp release`**（面还给角色），不要 `--unassign`（连角色一起清掉，就没人接了）。
@@ -245,11 +246,12 @@ EOF
 | `question` | 需要确认一个点才能继续 | 无 |
 | `decision` | 我们做了个选择，记一下理由 | 无 |
 | `handoff` | 我把这块交出去了 | 无 |
-| `result` | 干完了 | side 从 todo → doing |
+| `result` | 干完了 —— **直接用 `kp done`**，它报 result 并把面置完成 | 面置 done，下游解封 |
+| `finding` | 调研里的论点 / 发现（`kp research note`） | 无 |
 
 ### 上报的三条纪律
 
-1. **别静默结束**。干完活不吭声，别人以为你没动。收工就 `--type result`。
+1. **别静默结束**。干完活不吭声，别人以为你没动。收工用 `kp done KP-12 ui -m "…"`。
 2. **blocker 要说清"需要什么"**，不是"我很难"。`--mention` 上能解决的人或角色。
 3. **带证据**。截图、日志、复现步骤。`--attach` 或先 `kp attach`：
    ```bash

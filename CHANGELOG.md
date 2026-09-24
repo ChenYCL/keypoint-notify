@@ -3,6 +3,17 @@
 契约与非契约的边界见 [`docs/stability.md`](docs/stability.md)。「行为变化」一节列的是
 升级后你的脚本 / agent 循环可能感觉得到的地方。
 
+## 未发布
+
+### 新增
+
+- **调研**：看板新增「调研」页（`/research`），CLI 新增 `kp research`（`new` / `note` / `ask` /
+  `decide`），会话里 `/kp-research`。调研就是 kind=research 的任务：问题写在 goal，方案各一段，
+  论点是新的上报类型 `finding`，拿不准的是 `question`，定下来是 `decision`。
+  「待定」列出**所有**未完成任务里还没有定论的 question —— 规则是同一任务里之后出现
+  decision 就算定了。服务端新增 `GET /api/v1/research`。
+- 上报类型新增 `finding`（论点 / 发现）。按契约，枚举只增不改义；读到不认识的类型原样显示即可。
+
 ## v0.1.2 — 2026-09-24
 
 ### 新增

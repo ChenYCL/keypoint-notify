@@ -125,6 +125,7 @@ func reportHeadline(code string, rep model.Report) string {
 		model.ReportHandoff:  "交接",
 		model.ReportResult:   "✅ 结果",
 		model.ReportQuestion: "❓ 提问",
+		model.ReportFinding:  "💡 论点",
 	}[rep.Type]
 	if icon == "" {
 		icon = rep.Type
@@ -247,5 +248,32 @@ func (s *Server) handleInboxRead(w http.ResponseWriter, r *http.Request) {
 			}
 			return ""
 		}(),
+	})
+}
+
+// handleResearch is the "调研" view: research tasks as discussions, plus every
+// question anywhere that is still waiting for a decision. One call, so the
+// board, the CLI and an agent all see the same "what still needs deciding".
+func (s *Server) handleResearch(w http.ResponseWriter, r *http.Request) {
+	items, err := s.St.Research()
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	open, err := s.St.OpenQuestions(atoiOr(r.URL.Query().Get("limit"), 100))
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	decided := 0
+	for _, it := range items {
+		if it.State == "decided" {
+			decided++
+		}
+	}
+	writeOK(w, map[string]any{
+		"items": items, "open_questions": open,
+		"counts": map[string]int{"research": len(items), "decided": decided, "open_questions": len(open)},
+		"rule":   "一个 question 在同一任务里出现更晚的 decision 就算有定论；任务完成或归档后不再列出",
 	})
 }

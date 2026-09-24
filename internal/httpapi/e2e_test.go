@@ -578,8 +578,12 @@ func TestLLMSurfaceIsSelfDescribing(t *testing.T) {
 		Enums map[string][]string `json:"enums"`
 	}
 	h.do("GET", "/api/v1/schema", nil, &schema, http.StatusOK)
-	if len(schema.Enums["report_type"]) != 6 {
-		t.Errorf("schema should enumerate report types, got %v", schema.Enums["report_type"])
+	// Enums only ever grow (docs/stability.md), so check membership, not count.
+	have := strings.Join(schema.Enums["report_type"], ",")
+	for _, want := range []string{"progress", "blocker", "decision", "handoff", "result", "question", "finding"} {
+		if !strings.Contains(","+have+",", ","+want+",") {
+			t.Errorf("schema report_type should include %q, got %v", want, schema.Enums["report_type"])
+		}
 	}
 	if len(schema.Enums["skeleton_segment_keys"]) != 7 {
 		t.Errorf("schema should enumerate skeleton keys, got %v", schema.Enums["skeleton_segment_keys"])

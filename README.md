@@ -67,7 +67,7 @@ kp identity rotate alice                           # 需要换 key 时
 
 ## 斜杠命令（Claude Code / Kimi Code）
 
-`kp install`（或 `install.sh`）会把一个行为手册和七个斜杠命令装到本机：Claude Code 在
+`kp install`（或 `install.sh`）会把一个行为手册和八个斜杠命令装到本机：Claude Code 在
 `~/.claude/skills/`，Kimi Code 在 `~/.kimi-code/skills/`。在会话里输入 `/kp` 就能看到。
 
 | 做什么 | Claude Code | Kimi Code | 终端里的等价命令 |
@@ -79,12 +79,32 @@ kp identity rotate alice                           # 需要换 key 时
 | 放手 / 取消 | `/kp-cancel` | `/skill:kp-cancel` | `kp release …` / `kp cancel …` |
 | 定时自动处理 | `/kp-loop 10m` | — | `kp loop --agent claude` |
 | 订阅，来了就开始 | `/kp-watch` | `/skill:kp-watch` | `kp wait` / `kp watch KP-12` |
+| 调研 / 定论 | `/kp-research` | `/skill:kp-research` | `kp research new` / `note` / `ask` / `decide` |
 
 斜杠命令只是薄薄一层：它们让模型从当前会话里整理内容，再调上面那些 kp 命令。
 不装也能用 —— 说「记个任务」「上报一下」「我手上有什么」，行为手册 `keypoint-notify` 会被自动调起。
 
 不是 Claude Code / Kimi Code 的 agent，把服务端自带的说明书喂给它：
 `curl $KP/api/v1/llms.txt`（API）、`curl -H "Authorization: Bearer $KEY" $KP/api/v1/agent-prompt`（运行说明）。
+
+---
+
+## 调研：方案、论点、待定、定论
+
+agent 去调研一个方案、团队讨论一个取舍时，结论和理由不该散在聊天记录里。看板上的
+「调研」页（`/research`）和 `kp research` 把它们收在一起：**最上面是所有任务里还没人拍板的问题**，
+下面是每个调研的问题、方案、论点数和最近的定论。
+
+```bash
+kp research new "通知推送用 SSE 还是长轮询？" --option "A：SSE" --option "B：长轮询"
+kp research note   KP-12 -m "支持 B：会话里阻塞 25s 不会超时（证据…）"   # 论点
+kp research ask    KP-12 -m "要不要支持离线补发？" --mention @backend     # 拿不准 → 待定
+kp research decide KP-12 -m "定论：选 B，因为…" --close                   # 定论
+kp research                                                               # 还有什么没定
+```
+
+会话里是 `/kp-research`。规则只有一条：一个问题之后在同一任务里写了定论就算定了 ——
+所以清空「待定」的办法就是把结论写下来。agent 只写论点和问题，**不替人拍板**。
 
 ---
 

@@ -26,7 +26,7 @@ kind          bug | feature | chore | research | review | incident
 task status   inbox | ready | doing | blocked | review | done | archived
 side status   todo | doing | blocked | done
 priority      P0 | P1 | P2 | P3
-report type   progress | blocker | decision | handoff | result | question
+report type   progress | blocker | decision | handoff | result | question | finding
 ```
 
 这些值**只会增加，不会改义**。具体地说：

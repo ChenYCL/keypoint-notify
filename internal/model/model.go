@@ -58,6 +58,9 @@ const (
 	ReportHandoff  = "handoff"
 	ReportResult   = "result"
 	ReportQuestion = "question"
+	// ReportFinding is a research finding or argument — something learned or a
+	// point for or against an option, recorded before anything is decided.
+	ReportFinding = "finding"
 )
 
 // Priorities, ordered.
@@ -312,6 +315,7 @@ func ValidSideStatus(s string) bool { return validSideStatuses[s] }
 var validReportTypes = map[string]bool{
 	ReportProgress: true, ReportBlocker: true, ReportDecision: true,
 	ReportHandoff: true, ReportResult: true, ReportQuestion: true,
+	ReportFinding: true,
 }
 
 // ValidReportType reports whether t is a known report type.

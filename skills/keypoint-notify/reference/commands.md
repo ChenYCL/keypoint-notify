@@ -27,6 +27,16 @@ kp loop --agent claude|kimi [--max N]    无人值守：每件活起一个新会
 kp install [--target claude,kimi,…]      装行为手册 + /kp-xxx 斜杠命令
 ```
 
+## 调研 / 讨论
+
+```
+kp research                                   待定的问题（所有任务）+ 全部调研
+kp research new "问题" --option "A：…" --option "B：…" [--context "…"] [--role R]
+kp research note   KP-12 -m "论点 / 发现（带证据）"      → finding 上报
+kp research ask    KP-12 -m "拿不准的点" --mention @x    → question，进「待定」
+kp research decide KP-12 -m "定论：…" [--close]          → decision，之前的问题都算定了
+```
+
 ## init / config
 
 ```
