@@ -826,7 +826,21 @@ async function renderTask(code) {
   loading();
   let t;
   try { t = await api('GET', '/tasks/' + encodeURIComponent(code)); }
-  catch (e) { return fail(e); }
+  catch (e) {
+    // Never leave the spinner up: a link from the inbox or an old bookmark can
+    // point at a task that has since been deleted, and "加载中…" forever reads
+    // as a hang, not as "this is gone".
+    const a = e && e.api;
+    const gone = a && a.error === 'task_not_found';
+    const alt = a && a.did_you_mean
+      ? '<div style="margin-top:10px">你是指 <a href="/t/' + esc(a.did_you_mean) + '" data-link>' + esc(a.did_you_mean) + '</a>？</div>'
+      : '';
+    setView('<div class="empty-state"><div class="big">' + (gone ? '🗂️' : '⚠️') + '</div>' +
+      (gone ? esc(code) + ' 不存在 —— 可能已经被删除了' : '打不开 ' + esc(code) + '：' + esc(a ? a.message : String(e))) +
+      alt +
+      '<div style="margin-top:14px"><a class="btn tiny" href="/board" data-link>← 回看板</a></div></div>', true);
+    return;
+  }
   S.task = t;
   let reports = { reports: [] };
   try { reports = await api('GET', '/tasks/' + encodeURIComponent(code) + '/reports?limit=50'); }

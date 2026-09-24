@@ -472,8 +472,24 @@ func (s *Store) DeleteTask(codeOrID string) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(`DELETE FROM tasks WHERE id = ?`, t.ID)
-	return err
+	return s.tx(func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`DELETE FROM tasks WHERE id = ?`, t.ID); err != nil {
+			return err
+		}
+		// Notifications carry no foreign key, so the cascade does not reach
+		// them. Left alone, an inbox keeps "KP-14 进展" entries whose link opens
+		// a task that no longer exists. Drop them — except the deletion notice
+		// itself, which is the one thing worth telling people — and make that
+		// notice unclickable, since there is nothing left to open.
+		if _, err := tx.Exec(
+			`DELETE FROM notifications WHERE task_id = ?
+			   AND event_id NOT IN (SELECT id FROM events WHERE task_id = ? AND type = ?)`,
+			t.ID, t.ID, EvTaskDeleted); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`UPDATE notifications SET url = '' WHERE task_id = ?`, t.ID)
+		return err
+	})
 }
 
 func (s *Store) roleExists(key string) (bool, error) {
