@@ -62,6 +62,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PATCH /api/v1/tasks/{code}/sides/{key}", auth(http.HandlerFunc(s.handleSidePatch)))
 	mux.Handle("DELETE /api/v1/tasks/{code}/sides/{key}", auth(http.HandlerFunc(s.handleSideDelete)))
 	mux.Handle("POST /api/v1/tasks/{code}/sides/{key}/claim", auth(http.HandlerFunc(s.handleSideClaim)))
+	mux.Handle("POST /api/v1/tasks/{code}/watch", auth(http.HandlerFunc(s.handleWatch)))
+	mux.Handle("DELETE /api/v1/tasks/{code}/watch", auth(http.HandlerFunc(s.handleWatch)))
 	mux.Handle("GET /api/v1/tasks/{code}/reports", auth(http.HandlerFunc(s.handleReportList)))
 	mux.Handle("POST /api/v1/tasks/{code}/reports", auth(http.HandlerFunc(s.handleReportCreate)))
 	mux.Handle("GET /api/v1/tasks/{code}/events", auth(http.HandlerFunc(s.handleEventList)))

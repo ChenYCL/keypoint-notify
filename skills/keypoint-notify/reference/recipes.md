@@ -255,52 +255,38 @@ kp init --server https://kp.your-domain.com --key kp_xxx --yes
 
 ---
 
-## 在 Claude Code / Kimi Code 里开循环：一直等活、有活就干
+## 日常自动化：选一种
 
-skill 在循环里怎么被用上，两家各有两种方式。**都实测过的只有 Claude Code**；Kimi Code
-一栏按官方文档写，没有实机跑过。
+| 场景 | Claude Code | Kimi Code | 终端 |
+|---|---|---|---|
+| 我盯着，一次接一件 | `/kp-next` | `/skill:kp-next` | `kp next --claim` |
+| 会话开着，定时自动接 | `/kp-loop 10m`（= `/loop 10m /kp-next`） | 没有会话内定时器，用终端那列 | — |
+| 来了叫我（订阅） | `/kp-watch` | `/skill:kp-watch` | `kp wait` |
+| 关掉会话也一直跑 | — | — | `kp loop --agent claude` / `--agent kimi` |
 
-### Claude Code
+**会话内定时（Claude Code）**
 
-**A. 会话内循环（看得见，适合自己盯着）**
+- `/kp-loop 10m` 会建一个定时任务，每 10 分钟跑一次 `/kp-next`。会话开着且空闲才触发，7 天过期，
+  `/kp-cancel loop` 停。
+- kp-next 自带 `allowed-tools: Bash(kp:*)`，定时触发时 kp 命令不用点确认；它要改代码时仍按你会话的权限来。
+- 想让裸 `/loop` 就干这个：在项目里写 `.claude/loop.md`，内容一行 `/kp-next`。
+- 同一个会话里上下文会越积越多，一整天跑用无人值守。
 
-```
-/loop /keypoint-notify 用 kp next --wait 50 --claim 接一件活，按开工包做完：上报 result、把工作面置 done。没活就结束这一轮。
-```
+**订阅：来了就开始**
 
-- `/loop <prompt>` 不写间隔 = Claude 每轮自己挑下一次等多久（1 分钟到 1 小时）；
-  想固定节奏写 `/loop 1m /keypoint-notify …`。
-- prompt 里可以直接写 `/keypoint-notify`（skill 会被展开），不写也行 —— skill 的描述里有
-  「等活 / 轮到我」，Claude 会自己调它。
-- 只在会话开着、空闲时触发；7 天后自动过期；`Esc` 停掉自适应循环。
-- 权限沿用会话：先在 `/permissions` 里允许 `Bash(kp:*)`，否则每轮都要点确认。
-- 想让裸 `/loop` 就干这个：把上面那段 prompt 写进项目的 `.claude/loop.md`。
-- 同一个会话里上下文会越积越多；长时间跑用 B。
+`/kp-watch` 在后台挂 `kp wait`（有新活或新通知才退出），退出时会话被叫醒、开始处理，处理完再挂上。
+想盯别人的任务：`/kp-watch KP-12`（先 `kp watch KP-12` 让它的动态进你的收件箱）。
+`kp wait` 不认领、不动游标，不会吞掉把你叫醒的那条提及。
 
-**B. 无人值守（一件活一个新会话，上下文干净）**
-
-```bash
-KEYPOINT_HOME=~/.keypoint-be-bot kp loop --run 'claude -p "/keypoint-notify 照下面的开工包干活。做完先按包末尾的交付契约上报 result，再用 kp task side assign <任务号> <工作面> --status done 交棒。
-
-$KP_PACK" --allowedTools Bash < /dev/null'
-```
-
-- `kp loop` 负责等活和认领，拿到一件就起一个 `claude -p`，把开工包放进 `$KP_PACK`。
-- `--allowedTools Bash` 必须有，否则无头会话执行不了 kp；Skill 工具不需要额外放行。
-- `< /dev/null`：开工包已经在 prompt 里了，别让 `claude -p` 再从 stdin 读一遍。
-- 「置 done」要写明 —— 只上报 result 的话工作面停在 doing，下游永远等不到解封。
-
-### Kimi Code
-
-- skill 装在 `~/.kimi-code/skills/keypoint-notify/`（`kp install --target kimi`），
-  也认通用目录 `~/.agents/skills/`。手动调用是 `/skill:keypoint-notify`，也会按描述自动调用。
-- 没有 `/loop`，用 `kp loop` 包一层：
+**无人值守**
 
 ```bash
-KEYPOINT_HOME=~/.keypoint-be-bot kp loop --run 'kimi -p "用 keypoint-notify skill，照下面的开工包干活。做完先上报 result，再用 kp task side assign <任务号> <工作面> --status done 交棒。
-
-$KP_PACK" < /dev/null'
+cd ~/work/your-repo                                   # 会话在这个目录里改代码
+KEYPOINT_HOME=~/.keypoint-be-bot kp loop --agent claude
 ```
 
-- `kimi -p` 非交互模式默认自动批准工具调用（`--yolo` 不能和 `-p` 同时用），所以不用像
-  Claude 那样放行 Bash。
+- 每件活起一个新的 `claude -p`（上下文干净），做完它自己 `kp done`；Kimi 用 `--agent kimi`。
+- `--agent claude` 默认带 `--permission-mode acceptEdits --allowedTools Bash`：能改文件、跑命令，
+  不用人点。**只用 bot 的业务身份跑，别用管理员身份。**
+- 同一个角色可以开好几个，认领是原子的，不会两个人做同一件。
+- 要自己定制会话命令：`kp loop --run '<命令>'`，开工包在 `$KP_PACK` 和 stdin 里。

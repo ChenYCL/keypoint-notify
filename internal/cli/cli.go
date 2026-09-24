@@ -144,6 +144,18 @@ func Run(args []string) int {
 		return a.loop(rest)
 	case "claim":
 		return a.claim(rest)
+	case "done":
+		return a.done(rest)
+	case "release":
+		return a.release(rest)
+	case "cancel":
+		return a.cancel(rest)
+	case "watch":
+		return a.watch(rest, true)
+	case "unwatch":
+		return a.watch(rest, false)
+	case "wait":
+		return a.wait(rest)
 	case "inbox":
 		return a.inbox(rest)
 	case "attach":
@@ -388,50 +400,35 @@ func sortedKeys(m map[string]any) []string {
 func printTopHelp() {
 	fmt.Print(`kp — Keypoint Notify 客户端
 
-用法:
-  kp <命令> [参数]
-  kp <命令> --help          看某个命令的详细用法
+一天的活，按顺序就这几条:
+  kp board                          我手上有什么
+  kp next --claim                   接一件活（打印完整开工包）
+  kp report KP-12 -m "..."          中途上报（--type blocker|question|decision）
+  kp done KP-12 ui -m "..."         完结：上报结果 + 置完成，下游自动解封
+  kp release KP-12 ui -m "..."      放手：还给角色，别人能接
+  kp cancel KP-12 -m "..."          取消：记原因并归档
 
-常用（人和 agent 都用）:
-  kp init                   初始化：连服务器、建身份、写配置
-  kp board                  我手上的工作面 + 我负责的任务
-  kp whoami                 我是谁、有什么角色、多少未读
-  kp task list              列任务（--assigned me / --role / --status / --q）
-  kp task new               建任务（从当前上下文抽骨架分段）
-  kp task show KP-12        看任务全貌
-  kp task pack KP-12        取"开工上下文包"——可直接粘进模型
-  kp task seg KP-12 goal    取单段正文（可复制的最小单位）
-  kp report KP-12 -m "..."  上报进展/阻塞/结果
-  kp next --wait 30         有没有轮到我干的活（长轮询，含完整上下文）
-  kp loop                   一直等活，拿到就打印
-  kp inbox                  收件箱
+等活 / 订阅:
+  kp wait                           有新活或新通知就退出（放后台 = 来了叫醒我）
+  kp watch KP-12                    订阅一个任务的动态（unwatch 退订）
+  kp loop --run '<命令>'            一直等，每件活交给一个命令（无人值守）
 
-拆分与指派:
+建任务与分派:
+  kp task new --title "..." --goal "..." --acceptance "..."
   kp task side add KP-12 ui --role frontend --deps api
-  kp task side assign KP-12 ui --role frontend
-  kp task side ls KP-12
+  kp task pack KP-12 --side ui      开工包，可直接粘进模型
+  kp task list / show KP-12 / inbox
 
-管理:
-  kp serve                  在本机起服务器
-  kp identity ls|create|rotate|set-roles
-  kp role ls                角色表（--holders 看谁持有）
-  kp hook ls|add|rm         出站 webhook
-  kp events --follow        事件流
-  kp config get server      看/改本地配置
-  kp docs                   打印 /api/v1/llms.txt（完整 API 说明）
-  kp install                装 skill 到 ~/.claude/skills（从服务端拉）
+装与配置:
+  kp init --server URL --key kp_…   接入
+  kp install                        把斜杠命令装进 Claude Code / Kimi Code 等
+  kp whoami / kp config get server / kp docs
 
-全局参数:
-  --json                    机器可读输出
-  --server URL              覆盖服务端（或 KEYPOINT_SERVER）
-  --key kp_...              覆盖 API key（或 KEYPOINT_API_KEY）
-  --role <角色>             本次调用以哪个角色归属
+管理（需 admin）:
+  kp identity ls|create|rotate|set-roles   kp role ls|add|rm   kp hook ls|add|rm
 
-给 agent 的建议路径:
-  1) kp whoami                       确认身份与角色
-  2) kp board                        找工作面
-  3) kp task pack KP-12 --side ui    拿上下文开工
-  4) kp report KP-12 --side ui --type result -m "..."   收工上报
+全局参数: --json  --server URL  --key kp_…  --role <角色>
+每个命令都有 --help。
 `)
 }
 
@@ -675,6 +672,16 @@ func usageFor(cmd string) string {
 			"  从服务端拉 skill 装到本机认识的 CLI 里。\n"
 	case "docs":
 		return "kp docs\n\n  打印 /api/v1/llms.txt（完整 API 说明）。\n"
+	case "done":
+		return "kp done <code> [side] -m \"...\"\n\n  完结：上报结果 + 把工作面置为完成，下游自动解封。\n"
+	case "release":
+		return "kp release <code> <side> [-m 原因]\n\n  放弃认领：工作面还给它的角色。\n"
+	case "cancel":
+		return "kp cancel <code> -m \"原因\"\n\n  取消任务：记下原因并归档。\n"
+	case "watch", "unwatch":
+		return "kp watch|unwatch <code>\n\n  订阅/退订一个任务的动态（进收件箱）。\n"
+	case "wait":
+		return "kp wait [--timeout 600] [--task KP-12]\n\n  有新活或新通知就退出；第一行 KP-WAIT: work|notification|timeout。\n"
 	case "config":
 		return "kp config show | get <字段> | set <字段> <值> | path | env\n"
 	case "role", "roles":

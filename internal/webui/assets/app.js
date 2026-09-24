@@ -370,12 +370,6 @@ async function renderHome() {
   let prompt = '';
   try { prompt = await api('GET', '/agent-prompt', undefined, true); } catch (e) { /* show the fallback */ }
 
-  const quick = [
-    ['问有没有轮到我的活', 'kp next --wait 30 --claim'],
-    ['我手上有什么', 'kp board'],
-    ['拿某个任务的开工包', 'kp task pack KP-1 --side ui'],
-    ['上报进展 / 阻塞 / 结果', 'kp report KP-1 --side ui --type result -m "..."'],
-  ];
 
   let html = '<div class="home">';
 
@@ -399,77 +393,90 @@ async function renderHome() {
     '</div>' +
     '<aside class="hero-side">' +
       '<div class="side-card">' +
-        '<h3>让一个 agent 开始工作</h3>' +
+        '<h3>三步让 agent 干活</h3>' +
         '<ol class="steps">' +
-          '<li><span class="step-n">1</span><div><b>装 skill</b>' +
-            '<div class="faint small">把行为手册装到本机，Claude Code 自己会认</div>' +
-            '<code class="snippet">kp install --from ' + esc(base) + ' --key kp_…</code></div></li>' +
-          '<li><span class="step-n">2</span><div><b>粘一份运行说明</b>' +
-            '<div class="faint small">告诉它规则、订阅方式、循环怎么写</div>' +
-            '<button class="btn tiny" id="home-copy-prompt2">复制 Agent Prompt</button></div></li>' +
-          '<li><span class="step-n">3</span><div><b>让它等活</b>' +
-            '<div class="faint small">阻塞在服务端，有活立刻回来</div>' +
-            '<code class="snippet">kp next --wait 30 --claim</code></div></li>' +
+          '<li><span class="step-n">1</span><div><b>一条命令装好</b>' +
+            '<div class="faint small">kp + 配置 + 斜杠命令，认得出 Claude Code / Kimi Code</div>' +
+            '<code class="snippet">curl -fsSL "' + esc(base) + '/install.sh?key=kp_…" | sh</code></div></li>' +
+          '<li><span class="step-n">2</span><div><b>在会话里敲 <code>/kp</code></b>' +
+            '<div class="faint small">/kp-next 接活 · /kp-done 完结 · /kp-report 上报（Kimi：/skill:kp-next）</div></div></li>' +
+          '<li><span class="step-n">3</span><div><b>让它自己跑</b>' +
+            '<div class="faint small">会话里定时，或终端里无人值守</div>' +
+            '<code class="snippet">/kp-loop 10m</code>' +
+            '<code class="snippet">kp loop --agent claude</code></div></li>' +
         '</ol>' +
       '</div>' +
     '</aside>' +
   '</section>';
 
-  // 三种订阅方式 —— 用户明确要求「让 agent 知道订阅信息模式」
-  html += '<section class="section"><div class="section-head"><span>它怎么知道有活</span>' +
-    '<span class="rule"></span><a class="btn tiny" href="/skill/SKILL.md" target="_blank">SKILL.md</a>' +
+  // 日常自动化：按「谁在盯着」从多到少排。每张卡一条命令。
+  html += '<section class="section"><div class="section-head"><span>日常自动化，选一种</span>' +
+    '<span class="rule"></span><a class="btn tiny" href="/skill" target="_blank">全部 skill</a>' +
     '<a class="btn tiny" href="/api/v1/llms.txt" target="_blank">llms.txt</a></div>' +
     '<div class="modes">' +
-      modeCard('长轮询', '默认', 'kp next --wait 30 --claim',
-        '你只管等。服务端挂着连接，有活立刻返回——回来的就是「为什么是你 + 完整开工包」。' +
-        '每次唤醒一个请求，不是每秒一个。', true) +
-      modeCard('SSE 实时流', '要盯全量事件时', 'curl -N "$KP/api/v1/stream?since=N"',
-        '一条长连接推进来所有事件。适合一个进程看多个任务、或要做实时看板。要自己解析帧。', false) +
-      modeCard('Webhook 出口', '推给外部系统', 'kp hook add <url> --secret S',
-        '把事件 POST 到 Slack / n8n / 飞书。带 HMAC 签名，失败重试三次。', false) +
-      modeCard('缓慢轮询', '不能阻塞时', 'kp events --since <游标>',
-        '游标由服务端按身份记着，省略就是接着上次看。频率你自己定。', false) +
+      modeCard('我盯着干', '最常用', '/kp-next',
+        '接一件活、做完、交棒。一次一件，每一步你都看得到。', true) +
+      modeCard('会话里定时跑', 'Claude Code', '/kp-loop 10m',
+        '每 10 分钟自动 /kp-next 一次（等于 /loop 10m /kp-next）。会话开着才跑，7 天过期，/kp-cancel loop 停。', false) +
+      modeCard('来了叫我', '订阅', '/kp-watch',
+        '后台挂 kp wait，有新活或新通知就把会话叫醒并开始处理。kp watch KP-12 可以订阅别人的任务。', false) +
+      modeCard('无人值守 bot', '关掉会话也跑', 'kp loop --agent claude',
+        '在仓库目录里启动。每件活起一个新会话，做完自动 kp done。用 bot 身份，别用管理员。Kimi 用 --agent kimi。', false) +
+      modeCard('推到外部系统', '需 admin', 'kp hook add <url> --secret S',
+        '事件 POST 到飞书 / Slack / n8n，带 HMAC 签名。', false) +
     '</div></section>';
+
+  // 斜杠命令 ↔ kp 命令
+  const cmds = [
+    ['建任务', '/kp-new', 'kp task new --from-json task.json'],
+    ['接一件活', '/kp-next', 'kp next --claim'],
+    ['中途上报', '/kp-report', 'kp report KP-12 --side ui -m "…"'],
+    ['完结交棒', '/kp-done', 'kp done KP-12 ui -m "改了什么 / 怎么验证 / 风险"'],
+    ['放手 · 取消', '/kp-cancel', 'kp release KP-12 ui -m "…" · kp cancel KP-12 -m "…"'],
+    ['定时自动处理', '/kp-loop 10m', 'kp loop --agent claude'],
+    ['订阅 · 来了就开始', '/kp-watch', 'kp wait · kp watch KP-12'],
+  ];
+  html += '<section class="section"><div class="section-head"><span>斜杠命令</span>' +
+    '<span class="rule"></span></div>' +
+    '<table class="cmd-table"><thead><tr><th>做什么</th><th>在会话里</th><th>在终端里</th></tr></thead><tbody>' +
+    cmds.map(c => '<tr><td>' + esc(c[0]) + '</td><td><code>' + esc(c[1]) + '</code></td>' +
+      '<td><code>' + esc(c[2]) + '</code></td></tr>').join('') +
+    '</tbody></table>' +
+    // Kept out of the section heading: that heading is upper-cased by CSS, and
+    // "/KP-XXX" would read as a different command.
+    '<div class="faint small" style="margin-top:8px">Claude Code 里是 <code>/kp-next</code>，Kimi Code 里是 ' +
+    '<code>/skill:kp-next</code>。没装的话：<code>kp install</code>。</div></section>';
 
   // SOP：给人看的操作顺序。agent 读 SKILL.md，人读这里。
   html += '<section class="section"><div class="section-head"><span>一个任务的标准流程</span>' +
     '<span class="rule"></span>' +
     '<button class="btn tiny" id="home-toggle-sop">展开命令</button></div>' +
     '<div class="sop" id="sop-steps">' +
-      sopStep('1', '建任务', '把你会话里的上下文变成结构化任务',
-        ['kp task new --title "…" --goal "…" --acceptance "…"',
-         '# 或整份 JSON：kp task new --from-json - <<EOF'], true) +
-      sopStep('2', '拆工作面', '按角色切成 2-4 片，写明依赖',
-        ['kp task side add KP-12 api  --role backend',
-         'kp task side add KP-12 ui   --role frontend --deps api',
-         'kp task side add KP-12 rev  --role review   --deps ui']) +
-      sopStep('3', '派人', '指派给**角色**（不是某个人）；先确认这角色有人持有',
-        ['kp role ls --holders',
-         'kp task side assign KP-12 ui --role frontend']) +
-      sopStep('4', '等它自己走', '承接方用 kp next 拿包开工；交棒是副作用，不用你催',
-        ['kp task pack KP-12 --side ui   # 你要看就自己拉一份',
-         'kp board                        # 或看有没有卡住的'], true) +
-      sopStep('5', '盯与例外处理', '只有两种时候需要你介入：卡住、或者要改口径',
-        ['kp inbox --unread               # 有人 @ 我',
-         'kp task list --status blocked   # 谁卡住了',
-         'kp report KP-12 --type decision -m "口径改成…" --mention @ui']) +
-      sopStep('6', '收尾', '最后一个面完成时任务自动 done —— **别手动关**',
-        ['# 什么都不用做。想确认：kp task list --status done'], true) +
+      sopStep('1', '建任务', '**goal 和 acceptance 必须有**；按角色拆 2–4 个工作面，写清依赖',
+        ['/kp-new 一句话描述                  # 从会话里抽',
+         'kp task new --from-json task.json   # 或自己写',
+         'kp role ls --holders                # 派之前看这个角色有没有人'], true) +
+      sopStep('2', '接活', '承接方一条命令拿到开工包并认领；同角色多个会话不会抢到同一件',
+        ['/kp-next', 'kp next --claim']) +
+      sopStep('3', '中途上报', '卡住要说「需要什么」并 @ 能解决的人',
+        ['/kp-report', 'kp report KP-12 --side ui --type blocker -m "卡在…，需要…" --mention @backend']) +
+      sopStep('4', '完结交棒', '一条命令：上报结果 + 置完成，下游自动解封；最后一个面完成任务自动收尾',
+        ['/kp-done', 'kp done KP-12 ui -m "改了什么 / 怎么验证 / 遗留风险"'], true) +
+      sopStep('5', '放手或取消', '不做了还给角色（别人能接）；整件不要了就记原因归档',
+        ['kp release KP-12 ui -m "…"', 'kp cancel KP-12 -m "需求撤了"']) +
+      sopStep('6', '盯例外', '平时不用管，只看两样：谁卡住了、谁在问你',
+        ['kp board', 'kp task list --status blocked', 'kp inbox --unread']) +
     '</div>' +
     '<div class="best-practice">' +
       '<b>经验</b>' +
       '<ul>' +
-        '<li><b>goal 和 acceptance 是底线。</b>没有验收标准的任务，承接方只能猜，' +
-          '最后交付的东西一定不是你要的。不确定的写「（待确认：…）」，别编。</li>' +
-        '<li><b>别为了好看拆面。</b>2-4 片是常态；超过 5 片通常说明这是三个任务。</li>' +
-        '<li><b>指派前先查 <code>kp role ls --holders</code>。</b>没人持有的角色等于没人收到通知。</li>' +
-        '<li><b>一个面一个负责人。</b>要动别人的面先发 <code>handoff</code> 或 <code>question</code>，' +
-          '不要顺手改。</li>' +
-        '<li><b>阻塞要说清「需要什么」</b>，并 <code>--mention</code> 到能解决的人，' +
-          '而不是写一句「我很难」。</li>' +
-        '<li><b>干完必上报，不静默结束。</b>别人在等你的信号。</li>' +
-        '<li><b>同时开多个同角色会话时用 <code>--claim</code>。</b>' +
-          '不认领就开干，两个人会做同一件事。</li>' +
+        '<li><b>做完用 <code>kp done</code>，不要只报 result。</b>只上报的话面停在「进行中」，下游永远等不到解封。</li>' +
+        '<li><b>不做了用 <code>kp release</code>。</b><code>--unassign</code> 会连角色一起清掉，那个面就没人接了。</li>' +
+        '<li><b>goal 和 acceptance 是底线。</b>不知道的写「（待确认：…）」，别编 —— 下游会当真。</li>' +
+        '<li><b>派给角色，不派给人；派之前 <code>kp role ls --holders</code>。</b>没人持有的角色等于没人收到。</li>' +
+        '<li><b>bot 用业务身份跑，别用管理员 key。</b>无人值守的会话能改文件、跑命令。</li>' +
+        '<li><b><code>kp loop</code> 在要干活的仓库目录里启动。</b>会话就在那个目录里改代码。</li>' +
+        '<li><b>一个面一个负责人。</b>要动别人的面先 <code>kp report --type handoff</code> 说一声。</li>' +
       '</ul>' +
     '</div>' +
   '</section>';

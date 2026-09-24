@@ -2,11 +2,15 @@ package httpapi
 
 import (
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
+
+	"github.com/ChenYCL/keypoint-notify/internal/skill"
 )
 
 // ---------------------------------------------------------------------------
@@ -124,12 +128,16 @@ func agentPrompt(in promptInput) string {
 		"所以你换成什么角色，就等于「现在以什么身份接活」。\n\n")
 
 	// --- 订阅模式（用户特别要求的一块）---------------------------------
-	b.WriteString("---\n\n## 2. 怎么知道「有活轮到我」——三种订阅模式，选一种\n\n")
+	b.WriteString("---\n\n## 2. 怎么知道「有活轮到我」——几种订阅模式，选一种\n\n")
 	b.WriteString("| 模式 | 命令 | 什么时候用 | 代价 |\n|---|---|---|---|\n")
 	b.WriteString("| **长轮询**（默认） | `kp next --wait 30 --claim` | 你在等活。**默认就用这个** | 每次唤醒 1 个请求；没活时服务端挂着，不空转 |\n")
 	b.WriteString("| **SSE 实时流** | `curl -N \"$KP/api/v1/stream?since=N\"` | 要盯着**全量事件**（不只你自己的活）；一个进程看多个任务 | 一条长连接；要自己解析帧 |\n")
 	b.WriteString("| **轮询事件** | `kp events --since <游标>` | 不能阻塞的场合；批量拉、按需拉 | 每次 1 个请求，频率你自己定 |\n")
-	b.WriteString("| **Webhook** | `kp hook add <url>` | 你要把事件推到外部系统（Slack / n8n / 飞书） | 需要一个外部可达的接收地址 |\n\n")
+	b.WriteString("| **Webhook** | `kp hook add <url>` | 你要把事件推到外部系统（Slack / n8n / 飞书） | 需要一个外部可达的接收地址 |\n")
+	b.WriteString("| **来了叫醒** | `kp wait`（放后台） | 会话要干别的，有新活/新通知再叫醒它 | 退出即通知；第一行 `KP-WAIT: work\\|notification\\|timeout` |\n\n")
+	b.WriteString("装了斜杠命令的话（`kp install`），Claude Code 里直接 `/kp-next` 接活、`/kp-done` 完结、" +
+		"`/kp-loop 10m` 定时、`/kp-watch` 订阅；Kimi Code 里是 `/skill:kp-next` 这样的写法。" +
+		"关掉会话也要跑：`kp loop --agent claude`（或 `--agent kimi`）。\n\n")
 	b.WriteString("**默认选长轮询。** 它一次调用就回答三个问题——有没有属于我的活 / 为什么是我 / " +
 		"开工需要的全部上下文——而不是让你自己拼「拉事件 → 判断是不是我的 → 取任务 → 取上下文」。" +
 		"那四步里第二步的判断逻辑每个客户端都会写出不一样的结果。\n\n")
@@ -146,7 +154,7 @@ func agentPrompt(in promptInput) string {
 	b.WriteString("  # $OUT 是完整的开工包：为什么是你、你的工作面、要做的事、验收标准、\n")
 	b.WriteString("  # 以及末尾的「交付契约」——告诉你做完该调什么上报。照着做。\n")
 	b.WriteString("  ...\n")
-	b.WriteString("  kp task side assign <code> <side> --status done   # 交棒\n")
+	b.WriteString("  kp done <code> <side> -m \"改了什么 / 怎么验证 / 遗留风险\"   # 完结 + 交棒\n")
 	b.WriteString("done\n```\n\n")
 	b.WriteString("`kp next` 返回的第一段就是**为什么是你**，`reason` 决定你怎么做：\n\n")
 	b.WriteString("| reason | 含义 | 你该做什么 |\n|---|---|---|\n")
@@ -162,8 +170,9 @@ func agentPrompt(in promptInput) string {
 		"`--claim` 保证只有一个真正拿到。不认领就开干，会让两个人做同一件事。\n\n")
 	b.WriteString("**R2 · 被 @ 是问你问题，不是给你派活。** mention 指向的面可能属于别的角色——" +
 		"那条面不是你的，服务端也会拒绝你认领它。回应内容，然后把活留给它的主人。\n\n")
-	b.WriteString("**R3 · 干完必须上报，不要静默结束。** 别人在等你的信号。" +
-		"`kp report <code> --side <side> --type result -m \"改动摘要 + 验证方式 + 遗留风险\"`\n\n")
+	b.WriteString("**R3 · 干完用 `kp done`，不要静默结束，也不要只报 result。** " +
+		"`kp done <code> <side> -m \"改了什么 / 怎么验证 / 遗留风险\"` 一次完成上报和置完成；" +
+		"只报 result 的话面停在「进行中」，下游永远等不到。不做了用 `kp release <code> <side>` 还给角色。\n\n")
 	b.WriteString("**R4 · 别重复系统已经自动做的事。** 两件：\n" +
 		"  - 把 side 置为 `done` 会**自动解封**依赖它的下游，并发出 `side.unblocked`\n" +
 		"  - **最后一个 side 完成时，任务自动变 `done`**（事件 `reason=all_sides_done`）\n\n")
@@ -189,7 +198,7 @@ func agentPrompt(in promptInput) string {
 	b.WriteString("| `question` | 要确认一个点才能继续 | 无 |\n")
 	b.WriteString("| `decision` | 做了个选择，记下理由 | 无 |\n")
 	b.WriteString("| `handoff` | 把这块交出去 | 无 |\n")
-	b.WriteString("| `result` | 干完了 | side 从 todo → doing（随后你手动置 done） |\n\n")
+	b.WriteString("| `result` | 干完了 —— **直接用 `kp done`**，它会报 result 并置完成 | side 置 done，下游解封 |\n\n")
 	b.WriteString("```bash\nkp report KP-12 --side ui --type result -m \"改动摘要 + 验证方式 + 遗留风险\"\n" +
 		"kp report KP-12 --side ui --type blocker -m \"卡在哪、需要什么\" --mention @backend\n```\n\n")
 	b.WriteString("带证据（截图、日志）：`--attach shot.png`，或先 `kp attach shot.png --task KP-12`。\n" +
@@ -243,31 +252,63 @@ func orDefault(v, def string) string {
 // GET /skill/...   — hand the agent skill to a remote session
 // ---------------------------------------------------------------------------
 
-// handleSkill serves the embedded skill over HTTP.
+// handleSkill serves the embedded skills over HTTP.
 //
-// The skill is normally installed locally (`make skill`), but a session on
-// another machine — or an agent that has only been given a URL — needs a way to
-// read it. Same bytes either way: the copy in the binary is checked against the
-// source by a test.
+// Skills are normally installed locally, but a session on another machine — or
+// an agent that has only been given a URL — needs a way to read them. Same
+// bytes either way: the copy in the binary is checked against the source by a
+// test.
+//
+//	/skill                      a listing for people
+//	/skill/index.json           every skill and its files, for `kp install`
+//	/skill/kp-next/SKILL.md     one file of one skill
+//	/skill/SKILL.md             the playbook (unprefixed paths, as old clients ask)
 func (s *Server) handleSkill(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/skill")
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1")
+	path = strings.TrimPrefix(path, "/skill")
 	path = strings.TrimPrefix(path, "/")
-	if path == "" {
-		// A directory listing is more useful than a 404 for someone who typed
-		// the root out of curiosity.
-		writeText(w, http.StatusOK, "text/plain",
-			"keypoint agent skill\n\n"+
-				"  /skill/SKILL.md                       行为手册（给 agent 读）\n"+
-				"  /skill/reference/commands.md          全部命令与参数\n"+
-				"  /skill/reference/api.md               HTTP API\n"+
-				"  /skill/reference/recipes.md           常见组合\n\n"+
-				"客户端接入说明：/api/v1/agent-prompt\n")
+	if skillFS == nil {
+		writeText(w, http.StatusNotFound, "text/plain", "skills are not embedded in this build\n")
 		return
 	}
-	data, err := readSkill(path)
+	idx, err := skill.Index(skillFS)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+
+	switch path {
+	case "index.json":
+		writeOK(w, map[string]any{"main": skill.Main, "skills": idx})
+		return
+	case "":
+		var b strings.Builder
+		b.WriteString("keypoint agent skills\n\n")
+		b.WriteString("  /skill/SKILL.md                    行为手册（给 agent 读）\n")
+		b.WriteString("  /skill/reference/commands.md       全部命令与参数\n")
+		b.WriteString("  /skill/reference/api.md            HTTP API\n")
+		b.WriteString("  /skill/reference/recipes.md        常见组合\n\n")
+		b.WriteString("斜杠命令（Claude Code 里是 /名字，Kimi Code 里是 /skill:名字）：\n\n")
+		names := make([]string, 0, len(idx))
+		for n := range idx {
+			if n != skill.Main {
+				names = append(names, n)
+			}
+		}
+		sort.Strings(names)
+		for _, n := range names {
+			fmt.Fprintf(&b, "  /skill/%s/SKILL.md\n", n)
+		}
+		b.WriteString("\n装到本机：kp install（自动探测 Claude Code / Kimi Code 等）\n")
+		b.WriteString("客户端接入说明：/api/v1/agent-prompt\n")
+		writeText(w, http.StatusOK, "text/plain", b.String())
+		return
+	}
+
+	data, err := fs.ReadFile(skillFS, skill.Resolve(skillFS, path))
 	if err != nil {
 		writeText(w, http.StatusNotFound, "text/plain",
-			"no such skill file: "+path+"\n试试 /skill/SKILL.md\n")
+			"no such skill file: "+path+"\n试试 /skill/SKILL.md 或 /skill/index.json\n")
 		return
 	}
 	contentType := "text/markdown"
@@ -277,19 +318,12 @@ func (s *Server) handleSkill(w http.ResponseWriter, r *http.Request) {
 	writeText(w, http.StatusOK, contentType, string(data))
 }
 
-// skillReader is injected by main so this package does not depend on the embed
-// package directly — the HTTP layer should not know where the bytes live.
-var skillReader func(string) ([]byte, error)
+// skillFS is injected at startup so the HTTP layer does not reach for the embed
+// package's globals — tests and alternative builds can hand in their own tree.
+var skillFS fs.FS
 
-// SetSkillReader wires the skill source in at startup.
-func SetSkillReader(fn func(string) ([]byte, error)) { skillReader = fn }
-
-func readSkill(path string) ([]byte, error) {
-	if skillReader == nil {
-		return nil, fmt.Errorf("skill not embedded in this build")
-	}
-	return skillReader(path)
-}
+// SetSkillFS wires the skills tree in at startup.
+func SetSkillFS(fsys fs.FS) { skillFS = fsys }
 
 // ---------------------------------------------------------------------------
 // GET /install.sh  ·  GET /kp   — 让一台什么都没有的机器能起来

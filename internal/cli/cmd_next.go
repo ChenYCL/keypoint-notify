@@ -141,19 +141,34 @@ func (a *app) loop(args []string) int {
 	task := fs.String("task", "", "只看某个任务")
 	exclude := fs.String("exclude", "", "跳过的任务号，逗号分隔（这次不想接的）")
 	interval := fs.Int("interval", 1, "两条之间的最小间隔秒数")
+	agent := fs.String("agent", "", "claude | kimi：每件活交给一个新的无头会话去做")
+	agentArgs := fs.String("agent-args", "", "覆盖 --agent 的默认参数（高级）")
 	fs.Usage = func() {
-		fmt.Print(`kp loop — 一直等活、拿到就打印（可选执行命令）
+		fmt.Print(`kp loop — 一直等活，每件活交给一个会话去做
 
-  kp loop                                   有活就打印开工包
-  kp loop --run 'claude -p "$KP_PACK"'      把包喂给另一个会话
-  kp loop --max 3                           处理三条就退出
-  kp loop --task KP-1 --side ui             只盯一个工作面
+  kp loop --agent claude          无人值守：每件活起一个 claude -p，做完 kp done 交棒
+  kp loop --agent kimi            同上，用 kimi -p
+  kp loop                         只打印开工包（自己看 / 调试）
+  kp loop --run '<命令>'          开工包放在 $KP_PACK 和 stdin 里交给任意命令
+  kp loop --max 3                 处理三件就退出
+  kp loop --task KP-1 --side ui   只盯一个工作面
 
-Ctrl-C 退出。每拿到一条，游标自动前进，不会重复。
+在要干活的仓库目录里启动：会话就在这个目录里改代码。
+--agent claude 默认参数是 --permission-mode acceptEdits --allowedTools Bash，
+即可以改文件、跑命令而不用人点确认 —— 给 bot 身份用，别用管理员身份跑。
+Ctrl-C 退出。认领是原子的：同角色开几个 loop 不会抢到同一件。
 `)
 	}
 	if err := a.parseSub(fs, args); err != nil {
-		return ExitUsage
+		return subExit(err)
+	}
+	if *agent != "" && *run != "" {
+		return a.usage("--agent 和 --run 只能选一个", "--agent 是 --run 的预设")
+	}
+	if *agent != "" {
+		if _, err := agentCommand(*agent, "", *agentArgs); err != nil {
+			return a.usage(err.Error(), "可选：--agent claude | --agent kimi")
+		}
 	}
 
 	cursor := ""
@@ -185,7 +200,14 @@ Ctrl-C 退出。每拿到一条，游标自动前进，不会重复。
 		handled++
 		fmt.Printf("\n════ 第 %d 条 ════\n%s", handled, text)
 
-		if *run != "" {
+		switch {
+		case *agent != "":
+			cmd, _ := agentCommand(*agent, text, *agentArgs)
+			cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+			if err := cmd.Run(); err != nil {
+				fmt.Fprintln(os.Stderr, "✗ 会话失败:", err)
+			}
+		case *run != "":
 			if err := runWithPack(*run, text); err != nil {
 				fmt.Fprintln(os.Stderr, "✗ 命令失败:", err)
 			}
@@ -265,4 +287,48 @@ func (a *app) claim(args []string) int {
 		return ExitError
 	}
 	return ExitOK
+}
+
+// agentPrompt is what an unattended session is told before its pack. It is
+// short on purpose: the pack carries the context and the delivery contract;
+// this only fixes the three things unattended sessions got wrong in rehearsal —
+// taking over a face they were only asked about, stopping at "reported" without
+// closing the face, and wandering on to a second item.
+const agentPreamble = `你是 Keypoint 协作里的一个无人值守会话。下面是刚分派给你的一件活（已认领）。
+
+1. 先看「为什么是你」：reason=mention 只是有人问你，回答它（kp report <任务号> --type question 或 decision），不要接手那个工作面。
+2. 否则就把活真正做完：读代码、改、跑测试。上下文里没有的信息写「（待确认：…）」，不要编。
+3. 做完：kp done <任务号> <工作面> -m "改了什么 / 怎么验证 / 遗留风险" —— 这一步会解封下游，不做别人就一直等。
+   卡住：kp report <任务号> --side <工作面> --type blocker -m "卡在哪、需要什么" --mention @能解决的角色
+4. 只处理这一件，做完就结束。
+
+`
+
+// agentCommand builds the headless session for one work item. The pack goes in
+// as the prompt argument and stdin is left empty, so the CLI does not read the
+// pack a second time from a pipe.
+func agentCommand(kind, pack, override string) (*exec.Cmd, error) {
+	prompt := agentPreamble + pack
+	var name string
+	var args []string
+	switch kind {
+	case "claude":
+		name = "claude"
+		args = []string{"-p", prompt, "--permission-mode", "acceptEdits", "--allowedTools", "Bash"}
+	case "kimi":
+		// kimi -p approves tool calls on its own; --yolo is rejected with -p.
+		name = "kimi"
+		args = []string{"-p", prompt}
+	default:
+		return nil, fmt.Errorf("不认识的 --agent %q", kind)
+	}
+	if strings.TrimSpace(override) != "" {
+		args = append([]string{"-p", prompt}, strings.Fields(override)...)
+	}
+	if _, err := exec.LookPath(name); err != nil {
+		return nil, fmt.Errorf("找不到 %s 命令（没装，或不在 PATH 里）", name)
+	}
+	cmd := exec.Command(name, args...)
+	cmd.Env = append(os.Environ(), "KP_PACK="+pack)
+	return cmd, nil
 }

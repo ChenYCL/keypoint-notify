@@ -6,23 +6,22 @@
 一个 Go 单二进制：服务端、看板、CLI 全在里面。
 
 ```bash
-# 起服务（本机）
-kp serve --data ~/.keypoint/data
+# 接入（管理员给你的 key），顺带把斜杠命令装进 Claude Code / Kimi Code
+curl -fsSL "http://<服务端>/install.sh?key=kp_…" | sh
 
-# 另一个终端：连上去、建身份
-kp init
+# 一天的活，就这几条
+kp board                                   # 我手上有什么
+kp next --claim                            # 接一件活，打印完整开工包
+kp report KP-12 -m "接口写到一半"           # 中途上报（--type blocker|question|decision）
+kp done KP-12 ui -m "改了什么 / 怎么验证 / 风险"   # 完结：下游自动解封
+kp release KP-12 ui -m "今天做不完"         # 放手：还给角色，别人能接
+kp cancel KP-12 -m "需求撤了"               # 取消：记原因并归档
 
-# 建一个任务，带分段和工作面
-kp task new --title "登录页验证码倒计时错位" --kind bug --priority P1 \
-  --goal "切后台回来倒计时准确" \
-  --acceptance "iOS/Android 行为一致；单测覆盖 visibilitychange"
-
-kp task side add KP-1 ui --role frontend --deps api
-kp task side assign KP-1 ui --role frontend
-
-# 交给别人开工：一条命令拿到完整上下文
-kp task pack KP-1 --side ui | pbcopy     # 粘进任意 Claude Code 会话
+# 让它自己跑
+kp loop --agent claude                     # 无人值守：每件活一个新会话，做完自动 kp done
 ```
+
+在 Claude Code 里同样的事是 `/kp-next`、`/kp-done`、`/kp-report`…（Kimi Code：`/skill:kp-next`）。
 
 ---
 
@@ -66,50 +65,72 @@ kp identity rotate alice                           # 需要换 key 时
 
 ---
 
-## 给 agent 用
+## 斜杠命令（Claude Code / Kimi Code）
 
-**Skill**（Claude Code）：
+`kp install`（或 `install.sh`）会把一个行为手册和七个斜杠命令装到本机：Claude Code 在
+`~/.claude/skills/`，Kimi Code 在 `~/.kimi-code/skills/`。在会话里输入 `/kp` 就能看到。
 
-```bash
-make skill        # 链接到 ~/.claude/skills/keypoint-notify
-```
+| 做什么 | Claude Code | Kimi Code | 终端里的等价命令 |
+|---|---|---|---|
+| 建任务 | `/kp-new 一句话` | `/skill:kp-new` | `kp task new --from-json task.json` |
+| 接一件活 | `/kp-next` | `/skill:kp-next` | `kp next --claim` |
+| 中途上报 | `/kp-report` | `/skill:kp-report` | `kp report KP-12 -m "…"` |
+| 完结交棒 | `/kp-done` | `/skill:kp-done` | `kp done KP-12 ui -m "…"` |
+| 放手 / 取消 | `/kp-cancel` | `/skill:kp-cancel` | `kp release …` / `kp cancel …` |
+| 定时自动处理 | `/kp-loop 10m` | — | `kp loop --agent claude` |
+| 订阅，来了就开始 | `/kp-watch` | `/skill:kp-watch` | `kp wait` / `kp watch KP-12` |
 
-之后在会话里说"记个任务"、"上报一下"、"这个交给前端"、"我手上有什么"就会触发。
-Skill 会先 `kp whoami` 确认你的角色，再从当前会话里抽取骨架分段、判断要不要拆 side、
-指派给真实存在的角色。
+斜杠命令只是薄薄一层：它们让模型从当前会话里整理内容，再调上面那些 kp 命令。
+不装也能用 —— 说「记个任务」「上报一下」「我手上有什么」，行为手册 `keypoint-notify` 会被自动调起。
 
-**HTTP API**：服务端自带说明书，把这份喂给任何模型就行：
-
-```bash
-curl -H "Authorization: Bearer $KP_KEY" $KP/api/v1/llms.txt
-```
-
-设计要点：错误带 `hint` 和 `did_you_mean`（字段名写错会告诉你它该在哪），时间参数接受
-`7d` 这样的相对量，`pack` 默认返回 markdown，超限会显式说明截断了什么。
+不是 Claude Code / Kimi Code 的 agent，把服务端自带的说明书喂给它：
+`curl $KP/api/v1/llms.txt`（API）、`curl -H "Authorization: Bearer $KEY" $KP/api/v1/agent-prompt`（运行说明）。
 
 ---
 
-## 协作循环
+## 日常自动化：选一种
 
-被派活的会话不用自己轮询、自己判断「这件是不是我的」。一条调用回答三件事：
-**有没有属于我的活 / 为什么是我 / 开工需要的全部上下文**：
+| 场景 | 怎么开 | 说明 |
+|---|---|---|
+| 我盯着，一次一件 | `/kp-next` | 最常用。每一步都看得到 |
+| 会话开着，定时自动接 | `/kp-loop 10m` | = `/loop 10m /kp-next`。会话空闲才触发，7 天过期，`/kp-cancel loop` 停 |
+| 来了叫我 | `/kp-watch` | 后台挂 `kp wait`，有新活 / 新通知把会话叫醒；`/kp-watch KP-12` 盯别人的任务 |
+| 关掉会话也一直跑 | `kp loop --agent claude` | 在仓库目录里启动；每件活一个新会话，做完自动 `kp done`。Kimi：`--agent kimi` |
+| 推给飞书 / Slack / n8n | `kp hook add <url> --secret S` | 需 admin；HMAC 签名 |
 
-```bash
-kp next --wait 30 --claim        # 服务端挂起；轮到你的那一刻返回，附完整开工包
-```
+多个 bot 并行：每个 bot 一个身份、一个配置目录，
+`KEYPOINT_HOME=~/.keypoint-be-bot kp loop --agent claude`。同角色开几个都行，认领是原子的。
+
+---
+
+## 最佳实践
+
+- **做完用 `kp done`，不要只报 result。** 只上报的话面停在「进行中」，下游永远等不到解封。
+- **不做了用 `kp release`。** `kp task side assign --unassign` 会连角色一起清掉，那个面就没人接了。
+- **goal 和 acceptance 是底线。** 不知道的写「（待确认：…）」，别编 —— 下游会当真。
+- **派给角色，不派给人；派之前 `kp role ls --holders`。** 没人持有的角色等于没人收到。
+- **一个面一个负责人。** 要动别人的面，先 `kp report --type handoff` 说一声。
+- **卡住要说「需要什么」并 @ 能解决的人**：`--type blocker --mention @backend`。
+- **管理员 key 只做管理。** 日常身份（如 frontend）和 admin 分开放：`KEYPOINT_HOME=~/.keypoint-admin`。
+  bot 只给业务角色 —— 无人值守的会话能改文件、跑命令。
+- **`kp loop` 在要干活的仓库目录里启动。** 会话就在那个目录里改代码。
+
+---
+
+## 协作循环怎么运转
+
+一条调用回答三件事：**有没有属于我的活 / 为什么是我 / 开工需要的全部上下文**（`kp next`）。
 
 | `reason` | 含义 | 怎么做 |
 |---|---|---|
 | `mention` | 有人在上报里 @ 了你 | **回应**。不是让你接手他的工作面 |
 | `unblocked` | 你的面有依赖，刚全部完成 | 接手，开工 |
-| `assigned` | 指派给你角色的面（没有依赖），还没人认领 | 接手，开工 |
+| `assigned` | 指派给你角色的面，还没人认领 | 接手，开工 |
 | `owned` | 你是任务负责人，任务有新动静 | 看一眼，决定要不要派人 |
 
-- 把一个面置为 `done`，依赖它的下游**自动解封**并发 `side.unblocked`，等着的会话立刻被唤醒 ——
-  交棒是副作用，不是额外一步。最后一个面完成，任务自己收尾。
-- `--wait` 只为**新**东西醒来：手上已认领、之后没变化的面不会让它立刻返回，所以提完问题
-  直接 `kp next --wait 30` 等回答就行。新会话想接着干手上的活：不带 `--wait` 的 `kp next`。
-- 被 blocker 上报置为 `blocked` 的面不会被派出去，拿到回答后自己改回 `doing`。
+- 面完成 → 依赖它的下游**自动解封**，等着的会话立刻被唤醒。交棒是副作用，不是额外一步。
+- 最后一个面完成 → 任务自己收尾。
+- `kp next --wait 30` 只为**新**东西醒来；`kp wait` 同样等待但不认领、不动游标，适合放后台当「通知」。
 
 ---
 
@@ -117,11 +138,15 @@ kp next --wait 30 --claim        # 服务端挂起；轮到你的那一刻返回
 
 浏览器打开 `http://127.0.0.1:8787/`：
 
-**首页是上手引导**（不是看板）：一句话说清这套系统是什么、三步把 agent 拉起来
-（装 skill → 粘运行说明 → 等活）、四种订阅模式并排对比、当前在跑什么、以及
-一份可展开可复制的完整 Agent Prompt。看板在 `/board`。
+**首页是上手引导**（不是看板），从上到下：
 
+- 三步让 agent 干活：`curl … install.sh` → 会话里敲 `/kp` → `/kp-loop 10m` 或 `kp loop --agent claude`
+- 日常自动化五种场景并排，每张卡一条命令
+- 斜杠命令对照表（会话里 / 终端里）
+- 一个任务的标准流程（建 → 接 → 报 → 完结 → 放手/取消 → 盯例外），命令默认折叠
+- 最佳实践、当前在跑什么、可复制的完整 Agent Prompt
 
+看板在 `/board`。
 
 - 6 列看板，拖拽改状态
 - 任务页每个分段卡片右上角有**独立复制按钮**（"复制" / "复制为 prompt"）

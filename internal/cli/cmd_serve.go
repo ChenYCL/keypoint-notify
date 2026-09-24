@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	iofs "io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -68,9 +67,7 @@ func cmdServe(args []string) int {
 
 	// The skill lives in its own embed package; wire it in rather than making
 	// the HTTP layer reach for it directly.
-	httpapi.SetSkillReader(func(path string) ([]byte, error) {
-		return iofs.ReadFile(skillFS, path)
-	})
+	httpapi.SetSkillFS(skillFS)
 	// Serve our own binary so a fresh machine can bootstrap with just curl —
 	// resolve the real path rather than trusting os.Args[0], which may be a
 	// relative name or a symlink.

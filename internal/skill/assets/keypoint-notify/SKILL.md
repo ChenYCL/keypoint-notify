@@ -43,6 +43,24 @@ metadata:
 你写的东西会被别人直接用 `kp task pack` 拉出来，粘进他们的会话当上下文。
 所以：**具体、可执行、带验收标准**，别写"优化一下"。
 
+## 斜杠命令与对应的 kp 命令
+
+日常就这几步。斜杠命令在 Claude Code 里是 `/kp-xxx`，在 Kimi Code 里是 `/skill:kp-xxx`；
+每一步也都有一条 kp 命令可以直接敲。
+
+| 做什么 | 斜杠命令 | kp 命令 |
+|---|---|---|
+| 建任务 | `/kp-new` | `kp task new --from-json task.json` |
+| 接一件活 | `/kp-next` | `kp next --claim` |
+| 中途上报 | `/kp-report` | `kp report KP-12 --side ui -m "…"`（`--type blocker\|question\|decision`） |
+| 完结交棒 | `/kp-done` | `kp done KP-12 ui -m "改了什么 / 怎么验证 / 遗留风险"` |
+| 放手 / 取消 | `/kp-cancel` | `kp release KP-12 ui -m "…"` · `kp cancel KP-12 -m "…"` |
+| 定时自动处理 | `/kp-loop 10m` | `/loop 10m /kp-next` · 无人值守 `kp loop --agent claude` |
+| 订阅，来了就开始 | `/kp-watch` | `kp wait`（放后台）· `kp watch KP-12` |
+
+两条容易漏的：**做完用 `kp done`，不要只报 result**（否则面停在「进行中」，下游永远等不到）；
+**不做了用 `kp release`**（面还给角色），不要 `--unassign`（连角色一起清掉，就没人接了）。
+
 ---
 
 ## 如果你是被拉进来的（第一次接触这个系统）

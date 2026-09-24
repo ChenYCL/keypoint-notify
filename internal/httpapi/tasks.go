@@ -581,3 +581,28 @@ func boardHints(role string, sides []model.Side, unread int) []string {
 	}
 	return hints
 }
+
+// handleWatch subscribes (POST) or unsubscribes (DELETE) the caller to a task.
+//
+// Watchers get every event on the task in their inbox — the way to follow work
+// you do not own and are not assigned to, e.g. the upstream face you are
+// waiting on. `kp wait` then turns a new inbox entry into a wake-up.
+func (s *Server) handleWatch(w http.ResponseWriter, r *http.Request) {
+	actor := identity(r)
+	t, err := s.St.GetTask(r.PathValue("code"))
+	if err != nil {
+		respondError(w, s.taskNotFound(r.PathValue("code"), err))
+		return
+	}
+	watching := r.Method == http.MethodPost
+	if watching {
+		err = s.St.AddWatcher(t.ID, actor.ID)
+	} else {
+		err = s.St.RemoveWatcher(t.ID, actor.ID)
+	}
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	writeOK(w, map[string]any{"ok": true, "task": t.Code, "watching": watching})
+}

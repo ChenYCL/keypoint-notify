@@ -636,3 +636,12 @@ body.scrolled .topbar::after { opacity: 1; }
   background: var(--bg-raised); padding: 1px 5px; border-radius: 4px;
   color: var(--warn); font-size: 12px;
 }
+
+/* ---------------------------------------------------------------- command table */
+.cmd-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.cmd-table th { text-align: left; font-weight: 600; color: var(--fg-muted);
+  padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.cmd-table td { padding: 8px 10px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+.cmd-table td:first-child { white-space: nowrap; color: var(--fg-muted); }
+.cmd-table code { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+.hero-side .snippet + .snippet { margin-top: 5px; }

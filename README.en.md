@@ -78,38 +78,46 @@ immediately assignable.
 
 ---
 
-## For agents
-
-**Skill** (Claude Code):
+## Daily workflow — short commands
 
 ```bash
-make skill        # links into ~/.claude/skills/keypoint-notify
+kp board                                   # what's on my plate
+kp next --claim                            # take one item; prints the full work pack
+kp report KP-12 -m "halfway through"       # progress (--type blocker|question|decision)
+kp done KP-12 ui -m "what / how verified / risks"   # finish: report + close the face, downstream unblocks
+kp release KP-12 ui -m "can't finish today"         # hand the claim back to the role
+kp cancel KP-12 -m "requirement dropped"            # archive with a reason
+kp wait                                    # block until new work or a new notification
+kp watch KP-12                             # follow someone else's task
+kp loop --agent claude                     # unattended: one fresh session per item, it runs kp done itself
 ```
 
-After that, saying "file a task", "report progress", "hand this to frontend", or
-"what's on my plate" triggers it. The skill confirms your role first, then pulls
-segments out of the current session, decides whether to split work faces, and
-assigns to roles that actually exist.
+## Slash commands (Claude Code / Kimi Code)
 
-**Any CLI, any machine**:
+`kp install` (or `install.sh`) installs the playbook plus seven command skills — into
+`~/.claude/skills/` for Claude Code and `~/.kimi-code/skills/` for Kimi Code. Type `/kp`.
 
-```bash
-kp install --target claude,codex,gemini    # writes each CLI's native form
-curl -fsSL "http://<server>/install.sh?key=kp_xxx" | sh   # fresh machine
-```
+| Do | Claude Code | Kimi Code | Terminal |
+|---|---|---|---|
+| New task | `/kp-new` | `/skill:kp-new` | `kp task new --from-json task.json` |
+| Take work | `/kp-next` | `/skill:kp-next` | `kp next --claim` |
+| Report | `/kp-report` | `/skill:kp-report` | `kp report KP-12 -m "…"` |
+| Finish | `/kp-done` | `/skill:kp-done` | `kp done KP-12 ui -m "…"` |
+| Release / cancel | `/kp-cancel` | `/skill:kp-cancel` | `kp release …` / `kp cancel …` |
+| Scheduled | `/kp-loop 10m` | — | `kp loop --agent claude` |
+| Subscribe | `/kp-watch` | `/skill:kp-watch` | `kp wait` / `kp watch KP-12` |
 
-**HTTP API** — the server ships its own manual; feed it to any model:
+Other agents: feed them `GET /api/v1/llms.txt` and `GET /api/v1/agent-prompt`.
 
-```bash
-curl -H "Authorization: Bearer $KP_KEY" $KP/api/v1/llms.txt       # API reference
-curl -H "Authorization: Bearer $KP_KEY" $KP/api/v1/agent-prompt   # how to operate
-```
+## Best practices
 
-Design notes: errors carry `hint` and `did_you_mean`; time parameters accept
-`7d`-style relative values; `pack` returns markdown by default; size limits are
-announced rather than silent.
-
----
+- **Finish with `kp done`, not just a result report** — otherwise the face stays "doing" and downstream never unblocks.
+- **Give work back with `kp release`**, not `--unassign` (that clears the role too, so nobody is offered it).
+- **goal and acceptance are the floor.** Write "(to confirm: …)" instead of inventing.
+- **Assign to roles, not people; check `kp role ls --holders` first.**
+- **Keep the admin key for administration.** Daily identity and admin live in separate
+  `KEYPOINT_HOME` directories; bots get business roles only — unattended sessions edit files and run commands.
+- **Start `kp loop` inside the repository** the sessions should work in.
 
 ## The collaboration loop
 

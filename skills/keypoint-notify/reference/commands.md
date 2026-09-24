@@ -13,6 +13,20 @@
 
 ---
 
+## 工作流短命令（日常就用这几条）
+
+```
+kp next --claim                          接一件活（打印开工包并认领）
+kp report KP-12 --side ui -m "…"         中途上报，--type blocker|question|decision
+kp done KP-12 [ui] -m "…"                完结：上报 result + 面置 done；只有一个面在你名下时可省略面
+kp release KP-12 ui [-m "原因"]          放手：只清认领人，角色保留，同角色的人能接
+kp cancel KP-12 -m "原因"                取消：记 decision 并归档（恢复：kp task status KP-12 inbox）
+kp wait [--timeout 600] [--task KP-12]   有新活/新通知就退出；第一行 KP-WAIT: work|notification|timeout
+kp watch|unwatch KP-12                   订阅/退订一个任务的动态（进收件箱）
+kp loop --agent claude|kimi [--max N]    无人值守：每件活起一个新会话，做完自动 kp done
+kp install [--target claude,kimi,…]      装行为手册 + /kp-xxx 斜杠命令
+```
+
 ## init / config
 
 ```

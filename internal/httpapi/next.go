@@ -104,7 +104,13 @@ func (s *Server) handleNext(w http.ResponseWriter, r *http.Request) {
 	// on it". Work that is still outstanding stays outstanding for a different
 	// reason — an unclaimed side remains assigned, a mention remains in the
 	// inbox — so nothing is lost by moving the pointer forward.
-	_ = s.St.SetMeta("next_cursor:"+actor.ID, strconv.FormatInt(cursor, 10))
+	//
+	// peek=1 skips that: a watcher (`kp wait`) asks "has anything new arrived?"
+	// on behalf of the session, and must not swallow a mention the session's own
+	// next call is about to be shown.
+	if q.Get("peek") != "1" && q.Get("peek") != "true" {
+		_ = s.St.SetMeta("next_cursor:"+actor.ID, strconv.FormatInt(cursor, 10))
+	}
 
 	base := map[string]any{
 		"identity": actor.Name,

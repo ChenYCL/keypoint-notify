@@ -7,18 +7,27 @@
 
 ### 新增
 
-- skill 描述加上「等活 / 轮到我 / 循环接活」，循环模式下能被自动调起；配方里新增
-  「在 Claude Code / Kimi Code 里开循环」（`/loop`、`kp loop` + `claude -p` / `kimi -p`）。
+- **斜杠命令**：除了行为手册 `keypoint-notify`，新增七个命令 skill —— `/kp-new` 建任务、
+  `/kp-next` 接活、`/kp-report` 上报、`/kp-done` 完结、`/kp-cancel` 放手/取消/停自动、
+  `/kp-loop` 定时自动处理、`/kp-watch` 订阅（来了就开始）。Claude Code 里是 `/kp-xxx`，
+  Kimi Code 里是 `/skill:kp-xxx`；`kp install` 一起装。只有 `/kp-next`、`/kp-watch` 允许模型
+  自动调用（定时触发要用），其余只在你敲的时候执行。
+- **工作流短命令**：`kp done`（上报 result + 面置完成，一步完结）、`kp release`（只清认领人，
+  角色保留）、`kp cancel`（记原因并归档）、`kp wait`（有新活/新通知才退出，第一行
+  `KP-WAIT: work|notification|timeout`）、`kp watch` / `kp unwatch`。
+- **`kp loop --agent claude|kimi`**：无人值守的预设。每件活起一个新会话，带上一段短提示
+  （mention 只回答、做完用 kp done、只做一件），不用再手写一长串 `--run`。
+- 服务端：`POST/DELETE /api/v1/tasks/{code}/watch`；`/me/next?peek=1` 不推进游标；
+  `/skill/index.json` 与 `/skill/<名字>/…` 发放全部 skill（旧路径 `/skill/SKILL.md` 不变）。
+- 看板首页改版：三步上手、五种日常自动化场景、斜杠命令对照表、更短的标准流程和最佳实践。
+- skill 描述加上「等活 / 轮到我 / 循环接活」，循环模式下能被自动调起。
 
 ### 修复
 
-- **`kp install --target kimi` 装到了错的地方**：原来写 `~/.kimi/AGENTS.md`，那是已归档的旧
-  kimi-cli 的目录。现在的 Kimi Code 用 `~/.kimi-code/`，而且原生认 SKILL.md，所以改为装
-  完整技能目录到 `~/.kimi-code/skills/keypoint-notify/`（和 Claude Code 一样），自动探测也
-  改看 `~/.kimi-code`。
+- **`kp install --target kimi` 装到了错的地方**：原来写 `~/.kimi/AGENTS.md`（已归档的旧
+  kimi-cli 的目录）。现在的 Kimi Code 用 `~/.kimi-code/`，原生认 SKILL.md，改为装技能目录。
 - **删掉的任务不再在收件箱里留死链**：删除任务时一并清掉指向它的通知，只留「任务已删除」
-  那一条，且不可点。看板打开一个不存在的任务时显示「已被删除」和回看板的链接，而不是
-  一直「加载中…」。
+  那一条且不可点；看板打开不存在的任务显示「已被删除」而不是一直「加载中…」。
 
 ## v0.1.1 — 2026-09-24
 

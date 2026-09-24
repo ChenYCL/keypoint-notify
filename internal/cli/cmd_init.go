@@ -470,17 +470,12 @@ skill 内容从**服务端**拉（GET /skill/SKILL.md），所以对方拿到的
 		fmt.Printf("✓ 已接入 %s（@%s）@ %s\n", who.Identity.Name, who.Role, cfg.Server)
 	}
 
-	// 2. 把整个 skill 目录拉下来
-	files := []string{"SKILL.md", "reference/commands.md", "reference/api.md", "reference/recipes.md"}
-	contents := map[string]string{}
-	for _, f := range files {
-		body, err := api.GetText("/skill/" + f)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "✗ 拉取 /skill/%s 失败：%v\n", f, err)
-			fmt.Fprintln(os.Stderr, "  → 服务端可能太旧，没有 /skill 端点。升级服务端，或用 `kp skill install` 装内置副本")
-			return ExitError
-		}
-		contents[f] = body
+	// 2. 把 skill 拉下来：一个行为手册（keypoint-notify）+ 若干斜杠命令（kp-next …）
+	contents, extras, err := fetchSkills(api)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "✗", err)
+		fmt.Fprintln(os.Stderr, "  → 服务端可能太旧，没有 /skill 端点。升级服务端后再装")
+		return ExitError
 	}
 
 	if *dir == "-" {
@@ -496,7 +491,7 @@ skill 内容从**服务端**拉（GET /skill/SKILL.md），所以对方拿到的
 		}
 		fmt.Printf("✓ skill 已装到 %s（%d 个文件，来自 %s）\n", *dir, len(contents), cfg.Server)
 	} else {
-		installed, skipped, err := installForTargets(*target, contents, cfg.Server)
+		installed, skipped, err := installForTargets(*target, contents, extras, cfg.Server)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "✗", err)
 			return ExitError
@@ -582,7 +577,7 @@ func detectTargets(home string) []string {
 }
 
 // installForTargets installs the skill for each requested CLI.
-func installForTargets(spec string, contents map[string]string, server string) (installed, skipped []string, err error) {
+func installForTargets(spec string, contents map[string]string, extras map[string]map[string]string, server string) (installed, skipped []string, err error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, nil, fmt.Errorf("找不到家目录: %w", err)
@@ -623,7 +618,19 @@ func installForTargets(spec string, contents map[string]string, server string) (
 			if err := writeSkillDir(dir, contents); err != nil {
 				return installed, skipped, err
 			}
-			installed = append(installed, t.Label)
+			// The command skills sit next to the playbook, one directory each,
+			// which is what makes them show up as /kp-next (Claude Code) and
+			// /skill:kp-next (Kimi Code).
+			for cmd, files := range extras {
+				if err := writeSkillDir(filepath.Join(filepath.Dir(dir), cmd), files); err != nil {
+					return installed, skipped, err
+				}
+			}
+			label := t.Label
+			if len(extras) > 0 {
+				label += fmt.Sprintf(" + %d 个斜杠命令", len(extras))
+			}
+			installed = append(installed, label)
 			continue
 		}
 		path := t.Path
@@ -692,4 +699,47 @@ func skillDirTargets(home string) map[string]string {
 		"claude": filepath.Join(home, ".claude", "skills", "keypoint-notify"),
 		"kimi":   filepath.Join(home, ".kimi-code", "skills", "keypoint-notify"),
 	}
+}
+
+// fetchSkills pulls the playbook and the command skills from the server.
+//
+// Newer servers publish /skill/index.json; older ones only serve the playbook
+// at fixed paths, and for those the playbook alone is installed — the command
+// skills are a convenience, not something to fail an install over.
+func fetchSkills(api *client.Client) (main map[string]string, extras map[string]map[string]string, err error) {
+	var idx struct {
+		Main   string              `json:"main"`
+		Skills map[string][]string `json:"skills"`
+	}
+	if err := api.Get("/skill/index.json", &idx); err != nil || len(idx.Skills) == 0 {
+		main = map[string]string{}
+		for _, f := range []string{"SKILL.md", "reference/commands.md", "reference/api.md", "reference/recipes.md"} {
+			body, err := api.GetText("/skill/" + f)
+			if err != nil {
+				return nil, nil, fmt.Errorf("拉取 /skill/%s 失败：%w", f, err)
+			}
+			main[f] = body
+		}
+		return main, nil, nil
+	}
+	extras = map[string]map[string]string{}
+	for name, files := range idx.Skills {
+		got := map[string]string{}
+		for _, f := range files {
+			body, err := api.GetText("/skill/" + name + "/" + f)
+			if err != nil {
+				return nil, nil, fmt.Errorf("拉取 /skill/%s/%s 失败：%w", name, f, err)
+			}
+			got[f] = body
+		}
+		if name == idx.Main {
+			main = got
+		} else {
+			extras[name] = got
+		}
+	}
+	if main["SKILL.md"] == "" {
+		return nil, nil, fmt.Errorf("服务端的 skill 索引里没有行为手册 %q", idx.Main)
+	}
+	return main, extras, nil
 }

@@ -155,6 +155,7 @@ docs:     本文档是机器可读的权威说明；/api/v1/schema 是同一份�
   /api/v1/schema          同一份内容的 JSON 形式（枚举 / 错误码 / 端点表）
   /skill/SKILL.md         行为手册：什么时候该主动做什么、怎么从会话里抽任务
   /skill/reference/*.md   命令速查 / HTTP API / 常见配方
+  /skill/index.json       全部 skill（行为手册 + /kp-xxx 斜杠命令）及文件清单
   /api/v1/agent-prompt    运行说明（需带 key）：你是谁 + 规则 + 订阅模式 + 运行循环
                           这是「粘给一个 agent 就能让它上手」的那一份，
                           内容按调用者的真实身份和角色生成。
@@ -192,6 +193,8 @@ docs:     本文档是机器可读的权威说明；/api/v1/schema 是同一份�
   claim=1       拿到属于我的工作面就原子认领 —— 同角色的多个会话只有一个能抢到
   since=<游标>  显式指定从哪之后看。**省略时用你上次调用存下的游标**，
                 所以循环里不需要自己带着游标跑；不带 since 也不会反复收到同一条提及
+  peek=1        只看不动：不推进你存下的游标。替会话「盯着」的程序（kp wait）用它，
+                这样把会话叫醒的那条提及，会话自己再问时还在
   task= side=   收窄范围
   exclude=KP-1, KP-2   跳过这些任务。一个会话判定某件活不该由它接时用它，
                        否则会被永远推同一件（这是唯一的逃逸阀）
@@ -229,6 +232,13 @@ reason 的取值决定了你该怎么做：
 
   POST /api/v1/tasks/{code}/sides/{key}/claim
 
+放手（还给角色，别人能接）：PATCH /api/v1/tasks/{code}/sides/{key}
+  {"assignee_identity": "", "status": "todo"} —— 只清认领人，角色保留。
+  别用 unassign:true，那会连角色一起清掉，面就没人会收到了。
+
+订阅一个任务的动态（进你的收件箱）：
+  POST /api/v1/tasks/{code}/watch     DELETE 同一路径退订
+
 **只认领属于你的工作面。** 被 mention 不等于接管别人的面 —— 那是在问你问题，
 不是把活给你。服务端也会拒绝：认领只对「指派给你的角色 / 指派给你的身份」
 生效，别的面返回 claimed=false。
@@ -245,8 +255,24 @@ reason 的取值决定了你该怎么做：
       # $OUT 是完整的开工包，里面已经说明了：为什么是你、你的工作面、
       # 要做的事、以及做完该调什么上报。直接交给模型。
       ...
-      kp task side assign <code> <side> --status done   # 交棒（副作用：唤醒下游）
+      kp done <code> <side> -m "改了什么 / 怎么验证 / 遗留风险"   # 上报 + 置完成 = 交棒
     done
+
+不想自己写循环：kp loop --agent claude（或 --agent kimi）每件活起一个新会话，
+做完自动 kp done。
+
+CLI 的工作流短命令（每条都是一整步）：
+  kp next --claim            接一件活
+  kp report KP-12 -m "…"     中途上报（--type blocker|question|decision）
+  kp done KP-12 ui -m "…"    完结：result 上报 + 面置 done
+  kp release KP-12 ui        放手：还给角色
+  kp cancel KP-12 -m "…"     取消：记原因并归档
+  kp wait                    有新活/新通知才退出，第一行 KP-WAIT: work|notification|timeout
+  kp watch KP-12             订阅一个任务
+
+装了斜杠命令（kp install）的话，Claude Code 里是 /kp-next /kp-done /kp-report
+/kp-new /kp-cancel /kp-loop /kp-watch，Kimi Code 里是 /skill:kp-next 这样。
+清单：GET /skill 或 /skill/index.json
 
 不需要自己维护游标：省略 since 时服务端按身份记着上次看到哪了，
 所以循环不会反复收到同一条提及。要回放才显式传 since。

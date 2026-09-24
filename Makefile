@@ -34,19 +34,20 @@ run: build ## 本地起服务（数据在 ./data）
 sync-skill: ## 把 skills/ 同步到内嵌副本（改完 skill 必跑）
 	@rm -rf internal/skill/assets
 	@mkdir -p internal/skill/assets
-	@cp -r skills/keypoint-notify/. internal/skill/assets/
-	@echo "已同步 skills/keypoint-notify → internal/skill/assets"
+	@cp -r skills/. internal/skill/assets/
+	@echo "已同步 skills/ → internal/skill/assets（$$(ls skills | wc -l | tr -d ' ') 个 skill）"
 
-skill: sync-skill ## 把 skill 链接到 ~/.claude/skills/keypoint-notify
+skill: sync-skill ## 把 skills/ 下每个 skill 链接到 ~/.claude/skills/（开发用）
 	@mkdir -p $(HOME)/.claude/skills
-	@rm -rf $(HOME)/.claude/skills/keypoint-notify
-	ln -s $(CURDIR)/skills/keypoint-notify $(HOME)/.claude/skills/keypoint-notify
-	@echo "已链接 → $(HOME)/.claude/skills/keypoint-notify"
-	@echo '在 Claude Code 里说「上报一下」或「记个任务」就会触发'
+	@for d in skills/*/; do \
+	  n=$$(basename $$d); rm -rf $(HOME)/.claude/skills/$$n; \
+	  ln -s $(CURDIR)/skills/$$n $(HOME)/.claude/skills/$$n; echo "已链接 /$$n"; \
+	done
+	@echo '在 Claude Code 里输入 /kp 看全部斜杠命令'
 
 uninstall: ## 卸载二进制与 skill 链接
 	rm -f $(PREFIX)/bin/$(BINARY)
-	rm -rf $(HOME)/.claude/skills/keypoint-notify
+	@for d in skills/*/; do rm -rf $(HOME)/.claude/skills/$$(basename $$d); done
 
 clean: ## 清掉编译产物
 	rm -f $(BINARY)
