@@ -152,9 +152,13 @@ rsync -a ~/.keypoint/data/blobs/ /backup/blobs/
 ## 5. 升级
 
 ```bash
-make build                       # 或 go build -o kp ./cmd/keypoint
+git pull
+make install                     # → ~/.local/bin/kp，launchd 跑的就是它（make build 只产出 ./kp）
+make release-bin                 # 同事 install.sh 拿的各平台客户端也换成新版
 launchctl kickstart -k gui/$(id -u)/com.local.keypoint
 ```
+
+每个版本的行为变化见 [`CHANGELOG.md`](../CHANGELOG.md)。VPS 一键安装的服务端：重跑安装命令即可。
 
 数据库 schema 用 `CREATE TABLE IF NOT EXISTS`，启动时自动补齐，不需要手工迁移。
 （加列需要手工 `ALTER TABLE`——在当前规模下没有引入迁移框架。）

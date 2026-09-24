@@ -84,8 +84,32 @@ Skill 会先 `kp whoami` 确认你的角色，再从当前会话里抽取骨架�
 curl -H "Authorization: Bearer $KP_KEY" $KP/api/v1/llms.txt
 ```
 
-设计要点：错误带 `hint` 和 `did_you_mean`，时间参数接受 `7d` 这样的相对量，
-`pack` 默认返回 markdown，超限会显式说明截断了什么。
+设计要点：错误带 `hint` 和 `did_you_mean`（字段名写错会告诉你它该在哪），时间参数接受
+`7d` 这样的相对量，`pack` 默认返回 markdown，超限会显式说明截断了什么。
+
+---
+
+## 协作循环
+
+被派活的会话不用自己轮询、自己判断「这件是不是我的」。一条调用回答三件事：
+**有没有属于我的活 / 为什么是我 / 开工需要的全部上下文**：
+
+```bash
+kp next --wait 30 --claim        # 服务端挂起；轮到你的那一刻返回，附完整开工包
+```
+
+| `reason` | 含义 | 怎么做 |
+|---|---|---|
+| `mention` | 有人在上报里 @ 了你 | **回应**。不是让你接手他的工作面 |
+| `unblocked` | 你的面有依赖，刚全部完成 | 接手，开工 |
+| `assigned` | 指派给你角色的面（没有依赖），还没人认领 | 接手，开工 |
+| `owned` | 你是任务负责人，任务有新动静 | 看一眼，决定要不要派人 |
+
+- 把一个面置为 `done`，依赖它的下游**自动解封**并发 `side.unblocked`，等着的会话立刻被唤醒 ——
+  交棒是副作用，不是额外一步。最后一个面完成，任务自己收尾。
+- `--wait` 只为**新**东西醒来：手上已认领、之后没变化的面不会让它立刻返回，所以提完问题
+  直接 `kp next --wait 30` 等回答就行。新会话想接着干手上的活：不带 `--wait` 的 `kp next`。
+- 被 blocker 上报置为 `blocked` 的面不会被派出去，拿到回答后自己改回 `doing`。
 
 ---
 
@@ -142,6 +166,9 @@ sudo kp-admin identity create alice --kind human --roles frontend
 # → 打印一段接入说明，整段发给对方；对方一条 curl 装好 kp + skill
 ```
 
+管理员 CLI 在 VPS 上连的是 `127.0.0.1`，接入说明里给别人的地址是 `public_url`（脚本已按
+`--domain` 或公网 IP 设好；不对的话 `sudo kp-admin config set public_url <对外地址>`）。
+
 其他参数：`--local`（只听 127.0.0.1，自己配隧道/反代）、`--port`、`--admin`、
 `--version v0.2.0`、`--uninstall`。发版：推一个 `v*` tag，
 [`release.yml`](.github/workflows/release.yml) 会把四个平台的二进制和 `SHA256SUMS` 发到 Release。
@@ -156,10 +183,11 @@ curl -fsSL "http://<服务端>/install.sh?key=kp_xxx" | sh
 （服务端跑在 Linux 不代表你用 Linux）、`chmod +x`、用这个 key 接入并把
 skill 装到本机认识的 CLI 里。不需要仓库、不需要包管理器、不需要 Go。
 
-**服务端要先准备各平台的二进制**，否则 Mac 同事会拿到跑不起来的文件：
+服务端按请求方的平台从自己旁边的 `bin/kp-<os>-<arch>` 发二进制。一键安装脚本和 Docker
+镜像都已经带好四个平台；**自己从源码部署**时要补上，否则只有和服务端同平台的人装得上：
 
 ```bash
-make dist           # 交叉编译 darwin/linux × arm64/amd64 到 dist/
+make dist           # 交叉编译 darwin/linux × arm64/amd64 到 dist/（附 SHA256SUMS）
 make release-bin    # 放到服务端二进制旁边的 bin/
 ```
 
@@ -206,12 +234,24 @@ skill 内容从**服务端**拉，所以对方拿到的永远是这个服务端�
 make build          # → ./kp（CGO_ENABLED=0，真单二进制）
 make install        # → ~/.local/bin/kp
 make skill          # → ~/.claude/skills/（开发用，软链）
+```
 
 需要 Go 1.25+（下限由 `modernc.org/sqlite` 决定，不是本项目的代码）。
 
 公网访问推荐 **Cloudflare Tunnel** 而不是开端口；也支持 Docker（仓库根目录有
-`Dockerfile`，两阶段构建、运行镜像里没有 Go 和 C 库）。两种方式都见
-[`docs/deploy-tunnel.md`](docs/deploy-tunnel.md)。
+`Dockerfile`，两阶段构建、运行镜像里没有 Go 和 C 库，四个平台的客户端已放进镜像）。
+两种方式都见 [`docs/deploy-tunnel.md`](docs/deploy-tunnel.md)。
+
+### 升级
+
+| 部署方式 | 怎么升 |
+|---|---|
+| 服务端，一键安装的 | 重跑安装命令（数据和管理员不动） |
+| 服务端，Docker | 重新 build / 拉镜像，重建容器（数据在卷里） |
+| 服务端，源码 | `git pull && make install`，重启 `kp serve` |
+| 客户端 | `curl -fsSL "<服务端>/install.sh" \| sh` 换二进制，`kp install` 重装 skill |
+
+每个版本改了什么、哪些行为变了，见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ---
 
@@ -223,6 +263,8 @@ make skill          # → ~/.claude/skills/（开发用，软链）
 | [`docs/stability.md`](docs/stability.md) | **什么是契约、什么不是** —— 在它之上写工具之前先读这份 |
 | [`SECURITY.md`](SECURITY.md) | 漏洞报告，以及**部署前必须评估的设计取舍** |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 怎么编译、评审看什么 |
+| [`CHANGELOG.md`](CHANGELOG.md) | 每个版本的变化，**行为变化**单独列出 |
+| [`deploy/install-server.sh`](deploy/install-server.sh) | Linux VPS 服务端一键安装（`--help` 看参数） |
 | [`docs/deploy-tunnel.md`](docs/deploy-tunnel.md) | 部署：launchd、Cloudflare 隧道、Docker、备份、安全清单 |
 | [`skills/keypoint-notify/SKILL.md`](skills/keypoint-notify/SKILL.md) | Skill 本体：什么时候用、怎么从会话抽任务 |
 | [`skills/keypoint-notify/reference/commands.md`](skills/keypoint-notify/reference/commands.md) | 全部命令与参数 |
@@ -244,7 +286,7 @@ make skill          # → ~/.claude/skills/（开发用，软链）
 **让一个新 agent 上手的两种方式**：
 
 ```bash
-# 方式一：管理员生成一段可整段转发的说明（含 URL、一次性 key、角色、上手命令）
+# 方式一：管理员生成一段可整段转发的说明（含 install.sh 一行命令、一次性 key、角色、上手命令）
 kp identity create <名字> --kind agent --roles <角色>
 
 # 方式二：把一个已有身份的运行说明直接喂给模型
